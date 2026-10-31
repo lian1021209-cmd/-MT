@@ -1,0 +1,6 @@
+{
+  "name": "地鐵路網繪製器",
+  "description": "專業地鐵與捷運路網繪製工具，第一階段基礎功能：節點創造與節點路線連接。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "地鐵路網繪製器",
+  "short_name": "地鐵繪製器",
+  "description": "專業地鐵與捷運路網繪製工具，支援自由節點、8方位站名、等距紅色虛線對齊與多種路線樣式。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
