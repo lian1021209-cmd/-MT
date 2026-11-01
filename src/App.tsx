@@ -74,6 +74,7 @@ export default function App() {
   // Tool Mode controlled by the Left Toolbar
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
+  const [selectedStationIds, setSelectedStationIds] = useState<string[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
 
   const [gridSnap, setGridSnap] = useState<boolean>(true);
@@ -101,6 +102,17 @@ export default function App() {
     );
   };
 
+  const handleUpdateStationsPos = (updates: { id: string; x: number; y: number }[]) => {
+    if (updates.length === 0) return;
+    const map = new Map(updates.map((u) => [u.id, u]));
+    setStations((prev) =>
+      prev.map((st) => {
+        const u = map.get(st.id);
+        return u ? { ...st, x: u.x, y: u.y } : st;
+      })
+    );
+  };
+
   const handleUpdateStation = (updated: Station) => {
     setStations((prev) =>
       prev.map((st) => (st.id === updated.id ? updated : st))
@@ -113,6 +125,18 @@ export default function App() {
       prev.filter((c) => c.fromStationId !== id && c.toStationId !== id)
     );
     if (selectedStationId === id) setSelectedStationId(null);
+    setSelectedStationIds((prev) => prev.filter((sId) => sId !== id));
+  };
+
+  const handleBatchDeleteStations = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setStations((prev) => prev.filter((st) => !idSet.has(st.id)));
+    setConnections((prev) =>
+      prev.filter((c) => !idSet.has(c.fromStationId) && !idSet.has(c.toStationId))
+    );
+    setSelectedStationIds([]);
+    setSelectedStationId(null);
   };
 
   // Check and auto-convert stations to interchange when 2+ different colors intersect
@@ -219,7 +243,9 @@ export default function App() {
   };
 
   const handleDeleteSelected = () => {
-    if (selectedStationId) {
+    if (selectedStationIds.length > 0) {
+      handleBatchDeleteStations(selectedStationIds);
+    } else if (selectedStationId) {
       handleDeleteStation(selectedStationId);
     } else if (selectedConnectionId) {
       handleDeleteConnection(selectedConnectionId);
@@ -445,6 +471,7 @@ export default function App() {
           toolMode={toolMode}
           onSetToolMode={setToolMode}
           selectedStationId={selectedStationId}
+          selectedStationIds={selectedStationIds}
           selectedConnectionId={selectedConnectionId}
           gridSnap={gridSnap}
           gridSize={gridSize}
@@ -452,14 +479,32 @@ export default function App() {
           activeRouteType={activeRouteType}
           onSelectStation={(id) => {
             setSelectedStationId(id);
-            if (id) setSelectedConnectionId(null);
+            if (id) {
+              setSelectedConnectionId(null);
+              setSelectedStationIds((prev) => (prev.includes(id) && prev.length > 1 ? prev : [id]));
+            } else {
+              setSelectedStationIds([]);
+            }
+          }}
+          onSelectStationIds={(ids) => {
+            setSelectedStationIds(ids);
+            if (ids.length === 0) {
+              setSelectedStationId(null);
+            } else if (!ids.includes(selectedStationId || '')) {
+              setSelectedStationId(ids[0]);
+            }
           }}
           onSelectConnection={(id) => {
             setSelectedConnectionId(id);
-            if (id) setSelectedStationId(null);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+            }
           }}
           onAddStation={handleAddStation}
           onUpdateStationPos={handleUpdateStationPos}
+          onUpdateStationsPos={handleUpdateStationsPos}
+          onBatchDeleteStations={handleBatchDeleteStations}
           onUpdateStation={handleUpdateStation}
           onAddConnection={handleAddConnection}
           onUpdateConnectionWaypoints={handleUpdateConnectionWaypoints}

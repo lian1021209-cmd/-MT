@@ -76,7 +76,7 @@ export interface Connection {
   lineId?: string;
 }
 
-export type ToolMode = 'select' | 'pan' | 'add_station' | 'add_virtual_node' | 'connect';
+export type ToolMode = 'select' | 'marquee_select' | 'pan' | 'add_station' | 'add_virtual_node' | 'connect';
 
 export type ThemeMode = 'dark' | 'light' | 'auto';
 export type EffectiveTheme = 'dark' | 'light';

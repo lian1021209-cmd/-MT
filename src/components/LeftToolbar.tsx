@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   MousePointer, 
+  BoxSelect,
   PlusCircle, 
   XCircle,
   GitCommit, 
@@ -84,6 +85,25 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
         >
           <MousePointer className="w-4 h-4" />
           <span className="text-[9px] font-medium mt-0.5 scale-90">選取</span>
+        </button>
+
+        {/* 1.5 Marquee Box Selection Tool */}
+        <button
+          onClick={() => {
+            onSetToolMode('marquee_select');
+            setShowRouteFlyout(false);
+          }}
+          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all ${
+            toolMode === 'marquee_select'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+              : isLight
+              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+          title="框選多點 (S) — 拖曳滑鼠框選多個站點，或在選取模式按住 Shift 框選"
+        >
+          <BoxSelect className="w-4 h-4" />
+          <span className="text-[9px] font-medium mt-0.5 scale-90">框選</span>
         </button>
 
         {/* 2. Create Node Tool */}

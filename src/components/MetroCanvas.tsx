@@ -21,7 +21,8 @@ import {
   Minus, 
   Maximize2, 
   Crosshair, 
-  Compass
+  Compass,
+  X
 } from 'lucide-react';
 
 export interface AlignmentGuide {
@@ -53,15 +54,19 @@ interface MetroCanvasProps {
   toolMode: ToolMode;
   onSetToolMode: (mode: ToolMode) => void;
   selectedStationId: string | null;
+  selectedStationIds?: string[];
   selectedConnectionId: string | null;
   gridSnap: boolean;
   gridSize: number;
   nodeAlign?: boolean;
   activeRouteType: RouteType;
   onSelectStation: (id: string | null) => void;
+  onSelectStationIds?: (ids: string[]) => void;
   onSelectConnection: (id: string | null) => void;
   onAddStation: (station: Station) => void;
   onUpdateStationPos: (id: string, x: number, y: number) => void;
+  onUpdateStationsPos?: (updates: { id: string; x: number; y: number }[]) => void;
+  onBatchDeleteStations?: (ids: string[]) => void;
   onUpdateStation?: (updated: Station) => void;
   onAddConnection: (
     fromId: string, 
@@ -83,15 +88,19 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   toolMode,
   onSetToolMode,
   selectedStationId,
+  selectedStationIds = [],
   selectedConnectionId,
   gridSnap,
   gridSize,
   nodeAlign,
   activeRouteType,
   onSelectStation,
+  onSelectStationIds,
   onSelectConnection,
   onAddStation,
   onUpdateStationPos,
+  onUpdateStationsPos,
+  onBatchDeleteStations,
   onUpdateStation,
   onAddConnection,
   onUpdateConnectionWaypoints,
@@ -102,6 +111,11 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
+  // Current active selected station IDs list
+  const currentSelectedStationIds = selectedStationIds.length > 0 
+    ? selectedStationIds 
+    : (selectedStationId ? [selectedStationId] : []);
+
   // Infinite Canvas Viewport State: X, Y offset in pixels, and scale factor
   const [viewTransform, setViewTransform] = useState({ x: 120, y: 100, scale: 1 });
   
@@ -111,7 +125,22 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   const canvasPointerDownRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const hasDraggedCanvasRef = useRef(false);
 
-  // Station drag tracking
+  // Marquee selection box state (Shift + Drag on canvas)
+  interface MarqueeBox {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  }
+  const [marqueeBox, setMarqueeBox] = useState<MarqueeBox | null>(null);
+  const marqueeRef = useRef<{
+    startWorldX: number;
+    startWorldY: number;
+    initialSelectedIds: string[];
+    isAdditive: boolean;
+  } | null>(null);
+
+  // Station drag tracking (supports single station or batch dragging multiple stations)
   const [draggingStationId, setDraggingStationId] = useState<string | null>(null);
   const dragInfoRef = useRef<{
     stationId: string;
@@ -119,6 +148,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     startWorldY: number;
     startStationX: number;
     startStationY: number;
+    batchStationIds: string[];
+    initialPositions: Record<string, { x: number; y: number }>;
   } | null>(null);
 
   // Draggable Station Name tracking (自由站名可拖動)
@@ -232,10 +263,13 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         setActiveEqualDistanceGuide(null);
         activeEqualDistanceGuideRef.current = null;
         onSelectStation(null);
+        onSelectStationIds?.([]);
         onSelectConnection(null);
         onSetToolMode('select');
       } else if (e.key === 'v' || e.key === 'V') {
         onSetToolMode('select');
+      } else if (e.key === 's' || e.key === 'S') {
+        onSetToolMode('marquee_select');
       } else if (e.key === 'a' || e.key === 'A') {
         onSetToolMode('add_station');
       } else if (e.key === 'x' || e.key === 'X') {
@@ -249,7 +283,55 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onDeleteSelected, onSelectStation, onSelectConnection, onSetToolMode]);
+  }, [onDeleteSelected, onSelectStation, onSelectStationIds, onSelectConnection, onSetToolMode]);
+
+  // Batch alignment tools for selected stations
+  const handleBatchAlignY = () => {
+    if (currentSelectedStationIds.length < 2) return;
+    const selectedStations = stations.filter((s) => currentSelectedStationIds.includes(s.id));
+    if (selectedStations.length < 2) return;
+    const targetY = selectedStations[0].y;
+    const updates = selectedStations.map((s) => ({ id: s.id, x: s.x, y: targetY }));
+    if (onUpdateStationsPos) {
+      onUpdateStationsPos(updates);
+    } else {
+      updates.forEach((u) => onUpdateStationPos(u.id, u.x, u.y));
+    }
+  };
+
+  const handleBatchAlignX = () => {
+    if (currentSelectedStationIds.length < 2) return;
+    const selectedStations = stations.filter((s) => currentSelectedStationIds.includes(s.id));
+    if (selectedStations.length < 2) return;
+    const targetX = selectedStations[0].x;
+    const updates = selectedStations.map((s) => ({ id: s.id, x: targetX, y: s.y }));
+    if (onUpdateStationsPos) {
+      onUpdateStationsPos(updates);
+    } else {
+      updates.forEach((u) => onUpdateStationPos(u.id, u.x, u.y));
+    }
+  };
+
+  const handleBatchDistributeH = () => {
+    if (currentSelectedStationIds.length < 3) return;
+    const sorted = stations
+      .filter((s) => currentSelectedStationIds.includes(s.id))
+      .sort((a, b) => a.x - b.x);
+    if (sorted.length < 3) return;
+    const minX = sorted[0].x;
+    const maxX = sorted[sorted.length - 1].x;
+    const step = (maxX - minX) / (sorted.length - 1);
+    const updates = sorted.map((s, idx) => ({
+      id: s.id,
+      x: Math.round(minX + idx * step),
+      y: s.y,
+    }));
+    if (onUpdateStationsPos) {
+      onUpdateStationsPos(updates);
+    } else {
+      updates.forEach((u) => onUpdateStationPos(u.id, u.x, u.y));
+    }
+  };
 
 
   // Infinite Canvas Pan / Zoom via Wheel & Trackpad
@@ -379,6 +461,40 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           }
           return;
         }
+      }
+
+      // 框選多個站點 (Marquee box selection drag)
+      if (marqueeRef.current) {
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const startX = marqueeRef.current.startWorldX;
+        const startY = marqueeRef.current.startWorldY;
+        const endX = curWorld.rawX;
+        const endY = curWorld.rawY;
+
+        setMarqueeBox({
+          startX,
+          startY,
+          endX,
+          endY,
+        });
+
+        const minX = Math.min(startX, endX);
+        const maxX = Math.max(startX, endX);
+        const minY = Math.min(startY, endY);
+        const maxY = Math.max(startY, endY);
+
+        const insideIds = stations
+          .filter((st) => st.x >= minX && st.x <= maxX && st.y >= minY && st.y <= maxY)
+          .map((st) => st.id);
+
+        const combined = Array.from(new Set([...marqueeRef.current.initialSelectedIds, ...insideIds]));
+        onSelectStationIds?.(combined);
+        if (combined.length === 1) {
+          onSelectStation(combined[0]);
+        } else if (combined.length > 1) {
+          onSelectStation(combined[0]);
+        }
+        return;
       }
 
       // 自由站名拖動處理 (Draggable station name)
@@ -569,13 +685,35 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         return;
       }
 
-      // Station Drag: lock-step with lines
+      // Station Drag: lock-step with lines (支援單一站點與多站點批次移動)
       if (dragInfoRef.current) {
-        const { stationId, startWorldX, startWorldY, startStationX, startStationY } = dragInfoRef.current;
+        const { stationId, startWorldX, startWorldY, startStationX, startStationY, batchStationIds, initialPositions } = dragInfoRef.current;
         const deltaX = worldPos.rawX - startWorldX;
         const deltaY = worldPos.rawY - startWorldY;
         const candX = Math.round(startStationX + deltaX);
         const candY = Math.round(startStationY + deltaY);
+
+        const applyStationPosition = (targetX: number, targetY: number) => {
+          const moveDx = targetX - startStationX;
+          const moveDy = targetY - startStationY;
+          if (batchStationIds && batchStationIds.length > 1) {
+            const updates = batchStationIds.map((id) => {
+              const init = initialPositions[id] || { x: 0, y: 0 };
+              return {
+                id,
+                x: init.x + moveDx,
+                y: init.y + moveDy,
+              };
+            });
+            if (onUpdateStationsPos) {
+              onUpdateStationsPos(updates);
+            } else {
+              updates.forEach((u) => onUpdateStationPos(u.id, u.x, u.y));
+            }
+          } else {
+            onUpdateStationPos(stationId, targetX, targetY);
+          }
+        };
 
         // 平滑移動模式：按住 Ctrl 或開啟對齊模式觸發八方虛線與等距紅色虛線對齊
         const isCtrlActive = e.ctrlKey || e.metaKey || isCtrlPressedRef.current || !!nodeAlign;
@@ -584,8 +722,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           setActiveAlignmentGuides([]);
           activeEqualDistanceGuideRef.current = null;
           setActiveEqualDistanceGuide(null);
-          onUpdateStationPos(
-            stationId,
+          applyStationPosition(
             snapToGrid(candX, gridSize),
             snapToGrid(candY, gridSize)
           );
@@ -596,15 +733,15 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           setActiveAlignmentGuides([]);
           activeEqualDistanceGuideRef.current = null;
           setActiveEqualDistanceGuide(null);
-          onUpdateStationPos(stationId, candX, candY);
+          applyStationPosition(candX, candY);
           return;
         }
 
         // 觸發 Ctrl：計算與其他節點的八方 (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°) 軸向對齊與虛線
-        const candidateStations = stations.filter((s) => s.id !== stationId);
+        const candidateStations = stations.filter((s) => !batchStationIds?.includes(s.id));
         if (candidateStations.length === 0) {
           setActiveAlignmentGuides([]);
-          onUpdateStationPos(stationId, candX, candY);
+          applyStationPosition(candX, candY);
           return;
         }
 
@@ -797,7 +934,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         setActiveEqualDistanceGuide(eqGuide);
 
         setActiveAlignmentGuides(guides);
-        onUpdateStationPos(stationId, finalX, finalY);
+        applyStationPosition(finalX, finalY);
         return;
       }
 
@@ -828,6 +965,43 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         if (touchPointsRef.current.size < 2) {
           pinchStartRef.current = null;
         }
+      }
+
+      // Release marquee box selection
+      if (marqueeRef.current) {
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const startX = marqueeRef.current.startWorldX;
+        const startY = marqueeRef.current.startWorldY;
+        const endX = curWorld.rawX;
+        const endY = curWorld.rawY;
+
+        const minX = Math.min(startX, endX);
+        const maxX = Math.max(startX, endX);
+        const minY = Math.min(startY, endY);
+        const maxY = Math.max(startY, endY);
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        if (width < 6 && height < 6 && !marqueeRef.current.isAdditive) {
+          onSelectStationIds?.([]);
+          onSelectStation(null);
+        } else {
+          const insideIds = stations
+            .filter((st) => st.x >= minX && st.x <= maxX && st.y >= minY && st.y <= maxY)
+            .map((st) => st.id);
+          const combined = Array.from(new Set([...marqueeRef.current.initialSelectedIds, ...insideIds]));
+          onSelectStationIds?.(combined);
+          if (combined.length > 0) {
+            onSelectStation(combined[0]);
+          } else {
+            onSelectStation(null);
+          }
+        }
+
+        marqueeRef.current = null;
+        setMarqueeBox(null);
+        return;
       }
 
       // Release station label drag
@@ -954,8 +1128,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               setFreeDrawingPoints([]);
               onSetToolMode('select');
             }
-          } else if (toolMode === 'select') {
+          } else if (toolMode === 'select' || toolMode === 'marquee_select') {
             onSelectStation(null);
+            onSelectStationIds?.([]);
             onSelectConnection(null);
           }
         }
@@ -975,6 +1150,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       setActiveAlignmentGuides([]);
       activeEqualDistanceGuideRef.current = null;
       setActiveEqualDistanceGuide(null);
+      marqueeRef.current = null;
+      setMarqueeBox(null);
       canvasPointerDownRef.current = null;
       hasDraggedCanvasRef.current = false;
       setIsPanning(false);
@@ -993,8 +1170,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   }, [
     screenToWorld, 
     onUpdateStationPos, 
+    onUpdateStationsPos,
     onAddStation, 
     onSelectStation, 
+    onSelectStationIds,
     onSelectConnection, 
     onUpdateConnectionWaypoints,
     onSetToolMode,
@@ -1045,6 +1224,28 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         };
         return;
       }
+    }
+
+    // Check if user initiated a marquee box drag (Shift + Drag on canvas, or marquee_select mode)
+    const isMarqueeMode = toolMode === 'marquee_select';
+    const isShiftCanvasDrag = e.shiftKey && (toolMode === 'select' || isMarqueeMode);
+
+    if (isMarqueeMode || isShiftCanvasDrag) {
+      const worldPos = screenToWorld(e.clientX, e.clientY, false);
+      const isAdditive = e.shiftKey && currentSelectedStationIds.length > 0;
+      marqueeRef.current = {
+        startWorldX: worldPos.rawX,
+        startWorldY: worldPos.rawY,
+        initialSelectedIds: isAdditive ? [...currentSelectedStationIds] : [],
+        isAdditive,
+      };
+      setMarqueeBox({
+        startX: worldPos.rawX,
+        startY: worldPos.rawY,
+        endX: worldPos.rawX,
+        endY: worldPos.rawY,
+      });
+      return;
     }
 
     canvasPointerDownRef.current = {
@@ -1173,17 +1374,48 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       return;
     }
 
-    onSelectStation(station.id);
     onSelectConnection(null);
+
+    let nextBatchIds: string[];
+    if (e.shiftKey) {
+      // Shift+Click: Toggle this station in or out of selection
+      if (currentSelectedStationIds.includes(station.id)) {
+        nextBatchIds = currentSelectedStationIds.filter((id) => id !== station.id);
+      } else {
+        nextBatchIds = [...currentSelectedStationIds, station.id];
+      }
+      onSelectStationIds?.(nextBatchIds);
+      onSelectStation(nextBatchIds.length > 0 ? station.id : null);
+    } else {
+      // Normal click: If this station is already part of a multi-selection group, keep the group!
+      if (currentSelectedStationIds.includes(station.id) && currentSelectedStationIds.length > 1) {
+        nextBatchIds = currentSelectedStationIds;
+        onSelectStation(station.id);
+      } else {
+        nextBatchIds = [station.id];
+        onSelectStationIds?.([station.id]);
+        onSelectStation(station.id);
+      }
+    }
 
     const worldPos = screenToWorld(e.clientX, e.clientY, false);
     setDraggingStationId(station.id);
+
+    const initialPositions: Record<string, { x: number; y: number }> = {};
+    stations.forEach((s) => {
+      if (nextBatchIds.includes(s.id)) {
+        initialPositions[s.id] = { x: s.x, y: s.y };
+      }
+    });
+
     dragInfoRef.current = {
       stationId: station.id,
       startWorldX: worldPos.rawX,
       startWorldY: worldPos.rawY,
       startStationX: station.x,
       startStationY: station.y,
+      batchStationIds: nextBatchIds,
+      initialPositions,
     };
   };
 
@@ -1941,7 +2173,19 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 {/* Generous transparent hit area so all stations can be clicked and dragged effortlessly on mobile / desktop */}
                 <circle r={26} fill="transparent" className="cursor-pointer" />
 
-                {(isSelected || isConnectSource) && (
+                {/* Multi-selection outer glowing indicator */}
+                {currentSelectedStationIds.includes(st.id) && (
+                  <circle
+                    r={st.isVirtual ? 16 : 21}
+                    fill="rgba(99, 102, 241, 0.18)"
+                    stroke="#6366F1"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    pointerEvents="none"
+                  />
+                )}
+
+                {(isSelected || isConnectSource) && !currentSelectedStationIds.includes(st.id) && (
                   <circle
                     r={18}
                     fill="none"
@@ -2151,8 +2395,94 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             );
           })}
 
+          {/* Marquee Selection Rectangle (Shift + Drag) */}
+          {marqueeBox && (
+            <g className="pointer-events-none select-none">
+              <rect
+                x={Math.min(marqueeBox.startX, marqueeBox.endX)}
+                y={Math.min(marqueeBox.startY, marqueeBox.endY)}
+                width={Math.max(Math.abs(marqueeBox.endX - marqueeBox.startX), 1)}
+                height={Math.max(Math.abs(marqueeBox.endY - marqueeBox.startY), 1)}
+                fill="rgba(99, 102, 241, 0.16)"
+                stroke="#6366F1"
+                strokeWidth={1.5 / viewTransform.scale}
+                strokeDasharray={`${6 / viewTransform.scale} ${3 / viewTransform.scale}`}
+                rx={3 / viewTransform.scale}
+              />
+            </g>
+          )}
+
         </g>
       </svg>
+
+      {/* Floating Batch Selection Control Bar */}
+      {currentSelectedStationIds.length > 1 && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-2xl shadow-xl backdrop-blur-md border animate-in fade-in slide-in-from-top-2 duration-150 select-none bg-slate-900/95 border-slate-700 text-white max-w-[95vw]">
+          <div className="flex items-center gap-1.5 pr-2 border-r border-slate-700/80">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            <span className="text-xs font-semibold text-indigo-300 font-mono">
+              已框選 {currentSelectedStationIds.length} 個站點
+            </span>
+            <span className="text-[11px] text-slate-400 hidden md:inline ml-1">
+              (拖曳任一站點批次移動)
+            </span>
+          </div>
+
+          {/* Quick Batch Alignment Tools */}
+          <button
+            onClick={handleBatchAlignY}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700"
+            title="將選取站點水平對齊 (相同 Y 坐標)"
+          >
+            <span>水平對齊</span>
+          </button>
+
+          <button
+            onClick={handleBatchAlignX}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700"
+            title="將選取站點垂直對齊 (相同 X 坐標)"
+          >
+            <span>垂直對齊</span>
+          </button>
+
+          {currentSelectedStationIds.length >= 3 && (
+            <button
+              onClick={handleBatchDistributeH}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700 hidden sm:flex"
+              title="水平等距分散排列選取之站點"
+            >
+              <span>等距排列</span>
+            </button>
+          )}
+
+          {/* Batch Delete */}
+          <button
+            onClick={() => {
+              if (onBatchDeleteStations) {
+                onBatchDeleteStations(currentSelectedStationIds);
+              } else {
+                onDeleteSelected();
+              }
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 transition-colors cursor-pointer border border-rose-500/40"
+            title="批次刪除選取之所有站點 (Delete)"
+          >
+            <span>刪除 ({currentSelectedStationIds.length})</span>
+          </button>
+
+          {/* Deselect */}
+          <button
+            onClick={() => {
+              onSelectStationIds?.([]);
+              onSelectStation(null);
+            }}
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer ml-1"
+            title="取消選取 (Esc)"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

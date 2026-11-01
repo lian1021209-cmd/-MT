@@ -1253,10 +1253,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               快捷操作提示
             </h3>
             <ul className={`space-y-1.5 font-mono text-[11px] ${textMuted}`}>
+              <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Shift + 拖曳</kbd> 框選多個站點並批次移動</li>
               <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>滾輪 / 雙指</kbd> 縮放與平移無限畫布</li>
               <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>空白鍵 / 平移工具</kbd> 拖曳平移視野</li>
               <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>右下角 HUD</kbd> 聚焦路網或回到 (0,0)</li>
-              <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Delete</kbd> 刪除選取之節點或路線</li>
+              <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Delete</kbd> 批次刪除選取之節點或路線</li>
               <li>• <kbd className={`px-1 py-0.5 rounded border ${isLight ? 'bg-slate-100 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Esc</kbd> 取消連線或取消選取</li>
             </ul>
           </div>
