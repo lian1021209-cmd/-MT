@@ -1,27 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Station, 
-  MetroLine, 
-  Connection, 
+import {
+  Station,
+  MetroLine,
+  Connection,
   EffectiveTheme,
-  Point
+  Point,
 } from '../types/metro';
-import { 
-  BarChart3, 
-  PieChart, 
-  Ruler, 
-  GitFork, 
-  MapPin, 
-  Compass, 
-  Layers, 
-  TrendingUp, 
-  Activity, 
-  Hash, 
-  CheckCircle2, 
+import {
   AlertCircle,
-  HelpCircle,
-  Percent,
-  Info
+  ArrowUpRight,
 } from 'lucide-react';
 
 export interface NetworkStatsPanelProps {
@@ -29,6 +16,7 @@ export interface NetworkStatsPanelProps {
   connections: Connection[];
   lines: MetroLine[];
   theme: EffectiveTheme;
+  onSelectStation?: (stationId: string) => void;
 }
 
 export interface RouteColorStat {
@@ -40,7 +28,6 @@ export interface RouteColorStat {
   countPercentage: number;
 }
 
-// 根據坐標與走向風格計算線段實際幾何距離 (px)
 export const calculateConnectionLength = (
   conn: Connection,
   stationsMap: Map<string, Station>
@@ -49,7 +36,6 @@ export const calculateConnectionLength = (
   const toSt = stationsMap.get(conn.toStationId);
   if (!fromSt || !toSt) return 0;
 
-  // 自繪軌跡或具備中間控制點之線段：計算沿著所有 waypoints 的折線累積歐氏幾何距離
   if (conn.waypoints && conn.waypoints.length > 0) {
     let total = 0;
     let prev: Point = { x: fromSt.x, y: fromSt.y };
@@ -68,64 +54,63 @@ export const calculateConnectionLength = (
 
   switch (conn.routeType) {
     case 'straight':
-      // 直線歐氏距離
       return Math.round(Math.hypot(dx, dy));
-
     case '90_ortho':
-      // 90° 垂直曼哈頓折線距離
       return Math.round(absDx + absDy);
-
     case '135_bend':
     case '90_rotated': {
-      // 45°/135° 標準倒角幾何走勢長度：斜角段 + 水平/垂直延伸段
       const minD = Math.min(absDx, absDy);
       const diffD = Math.abs(absDx - absDy);
       return Math.round(minD * Math.SQRT2 + diffD);
     }
-
     case 'any_angle': {
-      // 任意角度轉折線長度
       const straight = Math.hypot(dx, dy);
       return Math.round(straight * 1.08);
     }
-
     default:
       return Math.round(Math.hypot(dx, dy));
   }
 };
 
-// 預設常見捷運色彩名稱對照表
 const KNOWN_COLOR_NAMES: Record<string, string> = {
-  '#E11D48': '淡水信義線 (紅線)',
-  '#2563EB': '板南線 (藍線)',
-  '#10B981': '松山新店線 (綠線)',
-  '#F59E0B': '中和新蘆線 (橘線)',
-  '#C084FC': '文湖線 (棕線)',
-  '#EAB308': '環狀線 (黃線)',
-  '#8B5CF6': '桃園捷運 (紫線)',
-  '#06B6D4': '淡海輕軌 (水藍線)',
-  '#6366F1': '安坑輕軌 (靛青線)',
-  '#EC4899': '萬大中和線 (粉紅線)',
+  '#E11D48': '淡水信義線',
+  '#2563EB': '板南線',
+  '#10B981': '松山新店線',
+  '#F59E0B': '中和新蘆線',
+  '#C084FC': '文湖線',
+  '#EAB308': '環狀線',
+  '#8B5CF6': '桃園捷運',
+  '#06B6D4': '淡海輕軌',
+  '#6366F1': '安坑輕軌',
+  '#EC4899': '萬大中和線',
 };
+
+export interface CriticalTransferHub {
+  station: Station;
+  connectionCount: number;
+  lineCount: number;
+  distinctColors: string[];
+  hasOverThreeLines: boolean;
+  isHighestDegree: boolean;
+}
 
 export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
   stations,
   connections,
   lines,
   theme,
+  onSelectStation,
 }) => {
   const isLight = theme === 'light';
   const [metricMode, setMetricMode] = useState<'length' | 'count'>('length');
   const [hoveredColor, setHoveredColor] = useState<string | null>(null);
 
-  // 1. 車站統計數據
   const stationStats = useMemo(() => {
     const total = stations.length;
     const regular = stations.filter((s) => !s.isVirtual && s.type !== 'interchange').length;
     const interchange = stations.filter((s) => !s.isVirtual && s.type === 'interchange').length;
     const virtual = stations.filter((s) => s.isVirtual).length;
 
-    // 孤立節點（尚未連線之站點）
     const connectedIds = new Set<string>();
     connections.forEach((c) => {
       connectedIds.add(c.fromStationId);
@@ -143,29 +128,24 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
     };
   }, [stations, connections]);
 
-  // 2. 路線連線與總長度統計
-  const { totalLength, lengthsByConnId, colorStats, longestSegment, shortestSegment, avgSegmentLength } = useMemo(() => {
+  const { totalLength, colorStats, longestSegment, avgSegmentLength } = useMemo(() => {
     const stationsMap = new Map<string, Station>(stations.map((s) => [s.id, s]));
     const lengthsMap = new Map<string, number>();
 
     let total = 0;
     let maxLen = -Infinity;
-    let minLen = Infinity;
 
     connections.forEach((c) => {
       const len = calculateConnectionLength(c, stationsMap);
       lengthsMap.set(c.id, len);
       total += len;
       if (len > maxLen) maxLen = len;
-      if (len < minLen) minLen = len;
     });
 
     if (connections.length === 0) {
       maxLen = 0;
-      minLen = 0;
     }
 
-    // 依顏色分組聚合
     const colorGroups = new Map<string, { count: number; length: number }>();
     connections.forEach((c) => {
       const col = (c.color || '#E11D48').toUpperCase();
@@ -177,11 +157,9 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
       });
     });
 
-    // 整理成清單並計算佔比
     const stats: RouteColorStat[] = Array.from(colorGroups.entries()).map(([col, data]) => {
-      // 尋找名稱
       const foundLine = lines.find((l) => l.color.toUpperCase() === col);
-      const name = foundLine?.name || KNOWN_COLOR_NAMES[col] || `${col} 路線`;
+      const name = foundLine?.name || KNOWN_COLOR_NAMES[col] || col;
       const lengthPercentage = total > 0 ? (data.length / total) * 100 : 0;
       const countPercentage = connections.length > 0 ? (data.count / connections.length) * 100 : 0;
 
@@ -195,33 +173,85 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
       };
     });
 
-    // 排序：預設按長度由大至小排列
     stats.sort((a, b) => b.length - a.length);
 
     return {
       totalLength: total,
-      lengthsByConnId: lengthsMap,
       colorStats: stats,
       longestSegment: maxLen > 0 ? maxLen : 0,
-      shortestSegment: minLen < Infinity && minLen > 0 ? minLen : 0,
       avgSegmentLength: connections.length > 0 ? Math.round(total / connections.length) : 0,
     };
   }, [stations, connections, lines]);
 
-  // 3. SVG 環形圓餅圖 (Donut Chart) 計算
+  // 建議關鍵轉乘站分析指標（連接超過 3 條線路 或 擁有最高節點連接數）
+  const { criticalTransferHubs, maxNodeDegree, overThreeLinesCount } = useMemo(() => {
+    if (stations.length === 0 || connections.length === 0) {
+      return {
+        criticalTransferHubs: [] as CriticalTransferHub[],
+        maxNodeDegree: 0,
+        overThreeLinesCount: 0,
+      };
+    }
+
+    const perStation = stations.map((st) => {
+      const incident = connections.filter(
+        (c) => c.fromStationId === st.id || c.toStationId === st.id
+      );
+      const distinctColors = Array.from(
+        new Set(incident.map((c) => (c.color || '#E11D48').toUpperCase()))
+      );
+      return {
+        station: st,
+        connectionCount: incident.length,
+        lineCount: distinctColors.length,
+        distinctColors,
+      };
+    });
+
+    const maxDegree = Math.max(0, ...perStation.map((item) => item.connectionCount));
+    const over3Count = perStation.filter((item) => item.lineCount > 3).length;
+
+    const hubs: CriticalTransferHub[] = perStation
+      .filter(
+        (item) =>
+          item.connectionCount > 0 &&
+          (item.lineCount > 3 || (maxDegree > 0 && item.connectionCount === maxDegree))
+      )
+      .map((item) => ({
+        ...item,
+        hasOverThreeLines: item.lineCount > 3,
+        isHighestDegree: maxDegree > 0 && item.connectionCount === maxDegree,
+      }))
+      .sort((a, b) => {
+        if (a.station.isVirtual !== b.station.isVirtual) {
+          return a.station.isVirtual ? 1 : -1;
+        }
+        if (b.lineCount !== a.lineCount) {
+          return b.lineCount - a.lineCount;
+        }
+        return b.connectionCount - a.connectionCount;
+      });
+
+    return {
+      criticalTransferHubs: hubs,
+      maxNodeDegree: maxDegree,
+      overThreeLinesCount: over3Count,
+    };
+  }, [stations, connections]);
+
   const donutSlices = useMemo(() => {
     if (colorStats.length === 0) return [];
 
     const cx = 90;
     const cy = 90;
     const radius = 68;
-    const innerRadius = 45;
+    const innerRadius = 50;
 
-    let cumulativeAngle = -90; // 從 12 點鐘方向開始
+    let cumulativeAngle = -90;
 
     return colorStats.map((item) => {
       const percentage = metricMode === 'length' ? item.lengthPercentage : item.countPercentage;
-      const angleSpan = Math.max((percentage / 100) * 360, 1.5); // 最少保留 1.5 度避免零長度
+      const angleSpan = Math.max((percentage / 100) * 360, 1.5);
 
       const startAngle = cumulativeAngle;
       const endAngle = cumulativeAngle + angleSpan;
@@ -230,13 +260,11 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
       const startRad = (startAngle * Math.PI) / 180;
       const endRad = (endAngle * Math.PI) / 180;
 
-      // 外弧端點
       const x1 = cx + radius * Math.cos(startRad);
       const y1 = cy + radius * Math.sin(startRad);
       const x2 = cx + radius * Math.cos(endRad);
       const y2 = cy + radius * Math.sin(endRad);
 
-      // 內弧端點
       const ix1 = cx + innerRadius * Math.cos(startRad);
       const iy1 = cy + innerRadius * Math.sin(startRad);
       const ix2 = cx + innerRadius * Math.cos(endRad);
@@ -244,7 +272,6 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
 
       const largeArcFlag = angleSpan > 180 ? 1 : 0;
 
-      // SVG path 構建環形切片
       const d = [
         `M ${x1} ${y1}`,
         `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
@@ -266,181 +293,245 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
     return colorStats.find((s) => s.color === hoveredColor) || null;
   }, [hoveredColor, colorStats]);
 
-  // 主題樣式常數
-  const cardBg = isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950/70 border-slate-800';
-  const textMuted = isLight ? 'text-slate-500' : 'text-slate-400';
-  const textHeading = isLight ? 'text-slate-900' : 'text-slate-100';
+  const borderCol = isLight ? 'border-zinc-200' : 'border-zinc-800';
+  const divideCol = isLight ? 'divide-zinc-200' : 'divide-zinc-800';
+  const textMuted = isLight ? 'text-zinc-500' : 'text-zinc-400';
+  const textHeading = isLight ? 'text-zinc-900' : 'text-zinc-100';
 
   return (
-    <div className="p-3.5 space-y-4 font-sans select-none">
-      {/* 頂部面板標題 */}
-      <div className={`pb-2.5 border-b flex items-center justify-between ${isLight ? 'border-slate-200' : 'border-slate-800'}`}>
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-indigo-600/10 text-indigo-500 flex items-center justify-center">
-            <BarChart3 className="w-3.5 h-3.5" />
-          </div>
-          <div>
-            <h2 className={`text-sm font-bold tracking-tight ${textHeading}`}>
-              路網統計與分析
-            </h2>
-            <p className={`text-[10px] ${textMuted}`}>
-              階段二 · 實時全網里程與線路分佈
-            </p>
-          </div>
-        </div>
-
-        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-          isLight ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-indigo-950/80 text-indigo-300 border-indigo-800'
-        }`}>
-          {colorStats.length} 條色彩路線
-        </span>
-      </div>
-
-      {/* 核心指標 3 大統計卡片 */}
-      <div className="grid grid-cols-3 gap-2">
-        {/* 1. 總站點數 */}
-        <div className={`p-2.5 rounded-xl border flex flex-col justify-between ${cardBg}`}>
-          <div className="flex items-center justify-between">
-            <span className={`text-[10px] font-medium ${textMuted}`}>總站點數</span>
-            <MapPin className="w-3.5 h-3.5 text-indigo-500" />
-          </div>
-          <div className="mt-1">
-            <span className={`text-xl font-black font-mono tracking-tight ${textHeading}`}>
-              {stationStats.total}
-            </span>
-            <span className={`text-[10px] ml-1 ${textMuted}`}>站</span>
-          </div>
-          <div className={`text-[9.5px] mt-1 pt-1 border-t truncate ${isLight ? 'border-slate-200 text-slate-500' : 'border-slate-800/80 text-slate-400'}`}>
-            營運 {stationStats.operational} · 轉折 {stationStats.virtual}
-          </div>
-        </div>
-
-        {/* 2. 總路線連接數 */}
-        <div className={`p-2.5 rounded-xl border flex flex-col justify-between ${cardBg}`}>
-          <div className="flex items-center justify-between">
-            <span className={`text-[10px] font-medium ${textMuted}`}>總路線連接</span>
-            <GitFork className="w-3.5 h-3.5 text-emerald-500" />
-          </div>
-          <div className="mt-1">
-            <span className={`text-xl font-black font-mono tracking-tight ${textHeading}`}>
-              {connections.length}
-            </span>
-            <span className={`text-[10px] ml-1 ${textMuted}`}>段</span>
-          </div>
-          <div className={`text-[9.5px] mt-1 pt-1 border-t truncate ${isLight ? 'border-slate-200 text-slate-500' : 'border-slate-800/80 text-slate-400'}`}>
-            換乘站 {stationStats.interchange} 站
-          </div>
-        </div>
-
-        {/* 3. 總路線長度 (座標距離) */}
-        <div className={`p-2.5 rounded-xl border flex flex-col justify-between ${cardBg}`}>
-          <div className="flex items-center justify-between">
-            <span className={`text-[10px] font-medium ${textMuted}`}>總路線長度</span>
-            <Ruler className="w-3.5 h-3.5 text-sky-500" />
-          </div>
-          <div className="mt-1">
-            <span className={`text-base font-black font-mono tracking-tight text-sky-500`}>
-              {totalLength >= 1000 ? `${(totalLength / 1000).toFixed(1)}k` : totalLength}
-            </span>
-            <span className={`text-[9px] font-mono ml-0.5 ${textMuted}`}>px</span>
-          </div>
-          <div className={`text-[9.5px] mt-1 pt-1 border-t truncate ${isLight ? 'border-slate-200 text-slate-500' : 'border-slate-800/80 text-slate-400'}`} title={`約 ${(totalLength / 100).toFixed(1)} 公里 (依 100px ≈ 1km 比例)`}>
-            ~{(totalLength / 100).toFixed(1)} km
-          </div>
-        </div>
-      </div>
-
-      {/* 車站型態細分進度標籤 */}
-      <div className={`p-2.5 rounded-xl border ${cardBg}`}>
-        <div className="flex items-center justify-between mb-2">
-          <span className={`text-xs font-semibold ${textHeading}`}>車站分佈型態</span>
-          <span className={`text-[10px] font-mono ${textMuted}`}>
-            換乘站比率: {stationStats.operational > 0 ? `${Math.round((stationStats.interchange / stationStats.operational) * 100)}%` : '0%'}
+    <div className="divide-y select-none font-sans text-xs divide-zinc-200 dark:divide-zinc-800">
+      {/* 1. Header & Core Metrics */}
+      <div className="p-4 space-y-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className={`text-sm font-semibold tracking-tight ${textHeading}`}>
+            路網統計
+          </h2>
+          <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
+            {colorStats.length} 條路線
           </span>
         </div>
 
-        {/* 車站比例條 */}
-        <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-200 dark:bg-slate-800">
-          {stationStats.total > 0 && (
-            <>
-              <div 
-                style={{ width: `${(stationStats.regular / stationStats.total) * 100}%` }} 
-                className="bg-indigo-500 transition-all" 
-                title={`普通站: ${stationStats.regular} (${Math.round((stationStats.regular / stationStats.total) * 100)}%)`}
-              />
-              <div 
-                style={{ width: `${(stationStats.interchange / stationStats.total) * 100}%` }} 
-                className="bg-amber-500 transition-all" 
-                title={`多線換乘站: ${stationStats.interchange} (${Math.round((stationStats.interchange / stationStats.total) * 100)}%)`}
-              />
-              <div 
-                style={{ width: `${(stationStats.virtual / stationStats.total) * 100}%` }} 
-                className="bg-emerald-500 transition-all" 
-                title={`轉折虛擬節點: ${stationStats.virtual} (${Math.round((stationStats.virtual / stationStats.total) * 100)}%)`}
-              />
-            </>
+        {/* 3-Column KPI Strip separated by hairlines */}
+        <div className={`grid grid-cols-3 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
+          <div className="p-2.5">
+            <div className={`text-[11px] ${textMuted}`}>站點</div>
+            <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
+              {stationStats.total}
+            </div>
+            <div className={`text-[10px] font-mono tabular-nums mt-0.5 ${textMuted}`}>
+              營運 {stationStats.operational}
+            </div>
+          </div>
+
+          <div className="p-2.5">
+            <div className={`text-[11px] ${textMuted}`}>連線</div>
+            <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
+              {connections.length}
+            </div>
+            <div className={`text-[10px] font-mono tabular-nums mt-0.5 ${textMuted}`}>
+              換乘 {stationStats.interchange}
+            </div>
+          </div>
+
+          <div className="p-2.5">
+            <div className={`text-[11px] ${textMuted}`}>總里程</div>
+            <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
+              {totalLength >= 1000 ? `${(totalLength / 1000).toFixed(1)}k` : totalLength}
+            </div>
+            <div className={`text-[10px] font-mono tabular-nums mt-0.5 ${textMuted}`}>
+              ~{(totalLength / 100).toFixed(1)} km
+            </div>
+          </div>
+        </div>
+
+        {/* Station Distribution Bar */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className={textMuted}>車站組成</span>
+            <span className={`font-mono tabular-nums ${textMuted}`}>
+              換乘率 {stationStats.operational > 0 ? `${Math.round((stationStats.interchange / stationStats.operational) * 100)}%` : '0%'}
+            </span>
+          </div>
+
+          <div className={`w-full h-1.5 rounded-full overflow-hidden flex ${isLight ? 'bg-zinc-100' : 'bg-zinc-800'}`}>
+            {stationStats.total > 0 && (
+              <>
+                <div
+                  style={{ width: `${(stationStats.regular / stationStats.total) * 100}%` }}
+                  className="bg-zinc-900 dark:bg-zinc-200 transition-all"
+                  title={`普通站: ${stationStats.regular}`}
+                />
+                <div
+                  style={{ width: `${(stationStats.interchange / stationStats.total) * 100}%` }}
+                  className="bg-indigo-500 transition-all"
+                  title={`換乘站: ${stationStats.interchange}`}
+                />
+                <div
+                  style={{ width: `${(stationStats.virtual / stationStats.total) * 100}%` }}
+                  className="bg-zinc-400 dark:bg-zinc-600 transition-all"
+                  title={`虛擬節點: ${stationStats.virtual}`}
+                />
+              </>
+            )}
+          </div>
+
+          <div className={`flex items-center gap-3 text-[11px] tabular-nums ${textMuted}`}>
+            <span>普通 {stationStats.regular}</span>
+            <span aria-hidden="true">·</span>
+            <span>換乘 {stationStats.interchange}</span>
+            <span aria-hidden="true">·</span>
+            <span>轉折 {stationStats.virtual}</span>
+          </div>
+
+          {stationStats.isolated > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 pt-1">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>有 {stationStats.isolated} 個車站尚未建立任何連線</span>
+            </div>
           )}
         </div>
+      </div>
 
-        {/* 標籤圖例 */}
-        <div className="grid grid-cols-3 gap-1 mt-2 text-[10px]">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-indigo-500" />
-            <span className={textMuted}>普通站 ({stationStats.regular})</span>
+      {/* 2. Critical Transfer Hubs */}
+      <div className="p-4 space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h3 className={`text-xs font-semibold ${textHeading}`}>建議關鍵轉乘站</h3>
+          <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
+            {criticalTransferHubs.length} 站入選
+          </span>
+        </div>
+
+        {/* Summary Strip */}
+        <div className={`grid grid-cols-2 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
+          <div className="px-2.5 py-2 flex items-center justify-between">
+            <span className={`text-[11px] ${textMuted}`}>最高連接數</span>
+            <span className={`font-mono font-semibold tabular-nums ${textHeading}`}>
+              {maxNodeDegree} 段
+            </span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-amber-500" />
-            <span className={textMuted}>換乘站 ({stationStats.interchange})</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span className={textMuted}>虛擬節點 ({stationStats.virtual})</span>
+          <div className="px-2.5 py-2 flex items-center justify-between">
+            <span className={`text-[11px] ${textMuted}`}>&gt;3 線交會</span>
+            <span className={`font-mono font-semibold tabular-nums ${textHeading}`}>
+              {overThreeLinesCount} 站
+            </span>
           </div>
         </div>
 
-        {stationStats.isolated > 0 && (
-          <div className={`mt-2.5 p-1.5 rounded-lg flex items-center gap-1.5 text-[10.5px] ${
-            isLight ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-amber-950/40 text-amber-300 border border-amber-800/60'
-          }`}>
-            <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-            <span>提醒：路網中有 {stationStats.isolated} 個車站尚未建立任何連線</span>
+        {criticalTransferHubs.length === 0 ? (
+          <p className={`py-4 text-center text-[11px] ${textMuted}`}>
+            建立車站連線後將自動識別關鍵轉乘站。
+          </p>
+        ) : (
+          <div className={`divide-y border rounded-lg max-h-56 overflow-y-auto ${borderCol} ${divideCol}`}>
+            {criticalTransferHubs.map((hub) => {
+              const { station, connectionCount, lineCount, distinctColors, hasOverThreeLines, isHighestDegree } = hub;
+              const isMarkedInterchange =
+                station.type === 'interchange' || station.type === 'interchange_3line';
+
+              const reasons: string[] = [];
+              if (hasOverThreeLines) reasons.push(`超過 3 條線路 (${lineCount})`);
+              if (isHighestDegree) reasons.push(`最高連接數 (${connectionCount})`);
+              if (!station.isVirtual && !isMarkedInterchange && lineCount >= 2) {
+                reasons.push('建議設為換乘站');
+              }
+
+              return (
+                <button
+                  key={`critical-hub-${station.id}`}
+                  type="button"
+                  onClick={() => onSelectStation?.(station.id)}
+                  className={`w-full px-3 py-2.5 text-left transition-colors cursor-pointer group ${
+                    isLight ? 'hover:bg-zinc-50' : 'hover:bg-zinc-900'
+                  }`}
+                  title="點擊選取此站點"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-xs font-medium truncate ${textHeading}`}>
+                        {station.isVirtual ? `虛擬節點 (${station.x}, ${station.y})` : station.name}
+                      </span>
+                      {station.code && !station.isVirtual && (
+                        <span className={`text-[10px] font-mono ${textMuted}`}>
+                          {station.code}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
+                        {lineCount} 線 · {connectionCount} 段
+                      </span>
+                      {onSelectStation && (
+                        <ArrowUpRight className={`w-3.5 h-3.5 ${textMuted} group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors`} />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className={`text-[10px] truncate ${textMuted}`}>
+                      {reasons.join(' · ')}
+                    </div>
+
+                    <div className="flex -space-x-1 items-center shrink-0">
+                      {distinctColors.slice(0, 6).map((col) => (
+                        <span
+                          key={col}
+                          className="w-2.5 h-2.5 rounded-full border border-white dark:border-zinc-900"
+                          style={{ backgroundColor: col }}
+                          title={col}
+                        />
+                      ))}
+                      {distinctColors.length > 6 && (
+                        <span className={`text-[9px] font-mono pl-1.5 ${textMuted}`}>
+                          +{distinctColors.length - 6}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
+
+        <p className={`text-[10px] leading-relaxed ${textMuted}`}>
+          自動列出連接超過 3 條色彩線路，或擁有全網最高節點連接數之樞紐站點。
+        </p>
       </div>
 
-      {/* 各顏色路線佔比圖表 (Donut Chart & Segmented Progress Bar) */}
-      <div className={`p-3 rounded-xl border ${cardBg}`}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1.5">
-            <PieChart className="w-3.5 h-3.5 text-indigo-500" />
-            <h3 className={`text-xs font-bold ${textHeading}`}>各顏色路線佔比圖表</h3>
-          </div>
+      {/* 3. Line Color Share & Donut Chart */}
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className={`text-xs font-semibold ${textHeading}`}>各色路線佔比</h3>
 
-          {/* 指標切換：依長度 vs 依連線數 */}
-          <div className={`flex items-center p-0.5 rounded-lg border text-[10px] font-medium ${
-            isLight ? 'bg-slate-100 border-slate-300' : 'bg-slate-900 border-slate-800'
-          }`}>
+          <div
+            className={`flex items-center p-0.5 rounded-md border text-[11px] ${
+              isLight ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-900 border-zinc-800'
+            }`}
+          >
             <button
               type="button"
               onClick={() => setMetricMode('length')}
-              className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 metricMode === 'length'
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  ? isLight
+                    ? 'bg-white text-zinc-900 font-medium shadow-2xs'
+                    : 'bg-zinc-800 text-zinc-100 font-medium'
                   : textMuted
               }`}
-              title="依各色路線實際坐標幾何長度計算佔比"
             >
               依長度
             </button>
             <button
               type="button"
               onClick={() => setMetricMode('count')}
-              className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 metricMode === 'count'
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  ? isLight
+                    ? 'bg-white text-zinc-900 font-medium shadow-2xs'
+                    : 'bg-zinc-800 text-zinc-100 font-medium'
                   : textMuted
               }`}
-              title="依各色路線連線段數量計算佔比"
             >
               依段數
             </button>
@@ -448,17 +539,14 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
         </div>
 
         {colorStats.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-400">
-            尚未建立路線連線，請切換至「節點連接」工具串連車站。
-          </div>
+          <p className={`py-6 text-center text-[11px] ${textMuted}`}>
+            尚未建立路線連線。
+          </p>
         ) : (
           <>
-            {/* SVG 環形圖表 (Donut Chart) */}
-            <div className="flex items-center justify-center my-2 relative">
-              <svg 
-                viewBox="0 0 180 180" 
-                className="w-40 h-40 filter drop-shadow-sm select-none"
-              >
+            {/* Minimalist Thin-Ring Donut Chart */}
+            <div className="flex items-center justify-center py-1">
+              <svg viewBox="0 0 180 180" className="w-36 h-36 select-none">
                 {donutSlices.map((slice) => {
                   const isHovered = hoveredColor === slice.color;
                   return (
@@ -466,12 +554,13 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                       key={slice.color}
                       d={slice.path}
                       fill={slice.color}
-                      stroke={isLight ? '#FFFFFF' : '#0F172A'}
-                      strokeWidth={isHovered ? 3 : 1.5}
-                      className="transition-all duration-150 cursor-pointer hover:opacity-90"
+                      stroke={isLight ? '#FFFFFF' : '#111113'}
+                      strokeWidth={isHovered ? 2.5 : 1.5}
+                      className="transition-all duration-150 cursor-pointer"
                       style={{
                         transformOrigin: '90px 90px',
-                        transform: isHovered ? 'scale(1.04)' : 'scale(1)',
+                        transform: isHovered ? 'scale(1.03)' : 'scale(1)',
+                        opacity: hoveredColor && !isHovered ? 0.45 : 1,
                       }}
                       onMouseEnter={() => setHoveredColor(slice.color)}
                       onMouseLeave={() => setHoveredColor(null)}
@@ -479,59 +568,56 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                   );
                 })}
 
-                {/* 圓心文字狀態指示器 */}
                 <g className="pointer-events-none">
+                  <circle cx="90" cy="90" r="46" fill={isLight ? '#FFFFFF' : '#111113'} />
                   {activeHoveredStat ? (
                     <>
-                      <circle cx="90" cy="90" r="42" fill={isLight ? '#FFFFFF' : '#0F172A'} />
                       <text
                         x="90"
-                        y="82"
+                        y="85"
                         textAnchor="middle"
-                        fill={activeHoveredStat.color}
-                        fontSize="13"
-                        fontWeight="bold"
-                        fontFamily="sans-serif"
+                        fill={isLight ? '#18181B' : '#FAFAFA'}
+                        fontSize="14"
+                        fontWeight="600"
+                        fontFamily="JetBrains Mono, monospace"
                       >
-                        {metricMode === 'length' 
-                          ? `${activeHoveredStat.lengthPercentage.toFixed(1)}%` 
+                        {metricMode === 'length'
+                          ? `${activeHoveredStat.lengthPercentage.toFixed(1)}%`
                           : `${activeHoveredStat.countPercentage.toFixed(1)}%`}
                       </text>
                       <text
                         x="90"
-                        y="98"
+                        y="102"
                         textAnchor="middle"
-                        fill={isLight ? '#64748B' : '#94A3B8'}
-                        fontSize="9"
-                        fontWeight="bold"
-                        fontFamily="sans-serif"
+                        fill={isLight ? '#71717A' : '#A1A1AA'}
+                        fontSize="9.5"
                       >
-                        {metricMode === 'length' ? `${activeHoveredStat.length}px` : `${activeHoveredStat.count}段`}
+                        {activeHoveredStat.name}
                       </text>
                     </>
                   ) : (
                     <>
-                      <circle cx="90" cy="90" r="42" fill={isLight ? '#FFFFFF' : '#0F172A'} />
                       <text
                         x="90"
-                        y="82"
+                        y="85"
                         textAnchor="middle"
-                        fill={isLight ? '#0F172A' : '#F8FAFC'}
-                        fontSize="12"
-                        fontWeight="bold"
-                        fontFamily="sans-serif"
+                        fill={isLight ? '#18181B' : '#FAFAFA'}
+                        fontSize="13"
+                        fontWeight="600"
+                        fontFamily="JetBrains Mono, monospace"
                       >
-                        {metricMode === 'length' ? `${(totalLength / 100).toFixed(0)} km` : `${connections.length} 段`}
+                        {metricMode === 'length'
+                          ? `${(totalLength / 100).toFixed(1)} km`
+                          : `${connections.length} 段`}
                       </text>
                       <text
                         x="90"
-                        y="98"
+                        y="102"
                         textAnchor="middle"
-                        fill={isLight ? '#64748B' : '#94A3B8'}
-                        fontSize="8.5"
-                        fontFamily="sans-serif"
+                        fill={isLight ? '#71717A' : '#A1A1AA'}
+                        fontSize="9.5"
                       >
-                        {metricMode === 'length' ? '總路線長度' : '總路線連線'}
+                        {metricMode === 'length' ? '總估算里程' : '總連線區段'}
                       </text>
                     </>
                   )}
@@ -539,31 +625,9 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
               </svg>
             </div>
 
-            {/* 水平色彩累積堆疊條 */}
-            <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-200 dark:bg-slate-800 mt-1 mb-3">
+            {/* Clean Color Breakdown List */}
+            <div className={`divide-y border rounded-lg max-h-56 overflow-y-auto ${borderCol} ${divideCol}`}>
               {colorStats.map((item) => {
-                const pct = metricMode === 'length' ? item.lengthPercentage : item.countPercentage;
-                return (
-                  <div
-                    key={item.color}
-                    style={{
-                      width: `${pct}%`,
-                      backgroundColor: item.color,
-                    }}
-                    className={`h-full transition-all cursor-pointer ${
-                      hoveredColor && hoveredColor !== item.color ? 'opacity-35' : 'opacity-100'
-                    }`}
-                    onMouseEnter={() => setHoveredColor(item.color)}
-                    onMouseLeave={() => setHoveredColor(null)}
-                    title={`${item.name}: ${pct.toFixed(1)}%`}
-                  />
-                );
-              })}
-            </div>
-
-            {/* 各顏色詳細數據排行清單 */}
-            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
-              {colorStats.map((item, idx) => {
                 const isHovered = hoveredColor === item.color;
                 const percentage = metricMode === 'length' ? item.lengthPercentage : item.countPercentage;
 
@@ -572,67 +636,30 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                     key={item.color}
                     onMouseEnter={() => setHoveredColor(item.color)}
                     onMouseLeave={() => setHoveredColor(null)}
-                    className={`p-2 rounded-lg border transition-all cursor-pointer flex flex-col gap-1.5 ${
-                      isHovered
-                        ? isLight
-                          ? 'bg-white border-indigo-400 shadow-sm'
-                          : 'bg-slate-900 border-indigo-500 shadow-sm'
-                        : isLight
-                        ? 'bg-white/80 border-slate-200 hover:border-slate-300'
-                        : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
+                    className={`px-3 py-2 transition-colors cursor-pointer ${
+                      isHovered ? (isLight ? 'bg-zinc-50' : 'bg-zinc-900') : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
-                        {/* 色彩方塊與排行序號 */}
-                        <div 
-                          className="w-3.5 h-3.5 rounded-md shrink-0 shadow-xs flex items-center justify-center text-[9px] font-bold text-white"
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: item.color }}
-                        >
-                          {idx + 1}
-                        </div>
-                        <div className="min-w-0">
-                          <span className={`text-xs font-semibold truncate block ${textHeading}`}>
-                            {item.name}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 佔比徽章 */}
-                      <div className="flex items-center gap-1.5 shrink-0 font-mono">
-                        <span className={`text-xs font-bold ${isHovered ? 'text-indigo-600 dark:text-indigo-400' : textHeading}`}>
-                          {percentage.toFixed(1)}%
-                        </span>
-                        <span className={`text-[10px] px-1 py-0.2 rounded border uppercase font-mono ${
-                          isLight ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}>
-                          {item.color}
+                        />
+                        <span className={`text-xs font-medium truncate ${textHeading}`}>
+                          {item.name}
                         </span>
                       </div>
-                    </div>
-
-                    {/* 明細指標：段數與長度 */}
-                    <div className="flex items-center justify-between text-[10.5px] font-mono">
-                      <span className={textMuted}>
-                        連線: <strong className={textHeading}>{item.count} 段</strong>
-                      </span>
-                      <span className={textMuted}>
-                        長度: <strong className={textHeading}>{item.length} px</strong>
-                        <span className="text-[9.5px] opacity-75 ml-1">
-                          (~{(item.length / 100).toFixed(1)}km)
-                        </span>
+                      <span className={`text-xs font-mono font-semibold tabular-nums shrink-0 ${textHeading}`}>
+                        {percentage.toFixed(1)}%
                       </span>
                     </div>
 
-                    {/* 個別進度長條 */}
-                    <div className="w-full h-1 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        style={{
-                          width: `${percentage}%`,
-                          backgroundColor: item.color,
-                        }}
-                        className="h-full rounded-full transition-all"
-                      />
+                    <div className={`flex items-center justify-between text-[10px] font-mono tabular-nums mt-1 ${textMuted}`}>
+                      <span>{item.count} 段</span>
+                      <span>
+                        {item.length} · ~{(item.length / 100).toFixed(1)} km
+                      </span>
                     </div>
                   </div>
                 );
@@ -642,39 +669,32 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
         )}
       </div>
 
-      {/* 路網幾何指標卡 (平均站距 / 最長站距) */}
-      <div className={`p-2.5 rounded-xl border ${cardBg}`}>
-        <div className="flex items-center gap-1.5 mb-2">
-          <Activity className="w-3.5 h-3.5 text-emerald-500" />
-          <h3 className={`text-xs font-bold ${textHeading}`}>站距指標 (座標幾何)</h3>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-            <span className={`text-[10px] block ${textMuted}`}>平均站距長度</span>
-            <span className={`text-sm font-bold font-mono ${textHeading}`}>
-              {avgSegmentLength} px
-            </span>
-            <span className={`text-[9.5px] block font-mono ${textMuted}`}>
-              約 {(avgSegmentLength / 100).toFixed(2)} km
-            </span>
+      {/* 4. Segment Distance Metrics */}
+      <div className="p-4 space-y-2.5">
+        <h3 className={`text-xs font-semibold ${textHeading}`}>區間站距</h3>
+        <div className={`grid grid-cols-2 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
+          <div className="p-2.5">
+            <div className={`text-[11px] ${textMuted}`}>平均站距</div>
+            <div className={`text-sm font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
+              {avgSegmentLength}
+            </div>
+            <div className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
+              ~{(avgSegmentLength / 100).toFixed(2)} km
+            </div>
           </div>
-
-          <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-            <span className={`text-[10px] block ${textMuted}`}>最長區間站距</span>
-            <span className={`text-sm font-bold font-mono text-emerald-500`}>
-              {longestSegment} px
-            </span>
-            <span className={`text-[9.5px] block font-mono ${textMuted}`}>
-              約 {(longestSegment / 100).toFixed(2)} km
-            </span>
+          <div className="p-2.5">
+            <div className={`text-[11px] ${textMuted}`}>最長區間</div>
+            <div className={`text-sm font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
+              {longestSegment}
+            </div>
+            <div className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
+              ~{(longestSegment / 100).toFixed(2)} km
+            </div>
           </div>
         </div>
-
-        <div className={`mt-2 text-[10px] flex items-center gap-1 ${textMuted}`}>
-          <Info className="w-3 h-3 shrink-0 opacity-70" />
-          <span>坐標幾何距離採歐氏折線實長計算（100px 約折合 1 公里）</span>
-        </div>
+        <p className={`text-[10px] ${textMuted}`}>
+          依畫布幾何路徑計算（100 座標單位約合 1 公里）。
+        </p>
       </div>
     </div>
   );

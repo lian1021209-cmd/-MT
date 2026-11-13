@@ -1,14 +1,12 @@
 import React from 'react';
-import { 
-  Grid, 
-  Trash2, 
-  Sparkles,
+import {
+  Grid,
+  Trash2,
   Move,
   Crosshair,
-  Keyboard,
   Undo2,
   Redo2,
-  BarChart3
+  RotateCcw,
 } from 'lucide-react';
 import { RouteType, EffectiveTheme } from '../types/metro';
 
@@ -31,6 +29,8 @@ interface ToolbarProps {
   onRedo?: () => void;
   onOpenStats?: () => void;
   isStatsActive?: boolean;
+  onOpenRouting?: () => void;
+  isRoutingActive?: boolean;
 }
 
 export const ROUTE_TYPE_OPTIONS: { type: RouteType; label: string; desc: string; icon: string }[] = [
@@ -54,164 +54,139 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   stationCount,
   connectionCount,
   theme = 'dark',
-  onOpenShortcuts,
   canUndo = false,
   onUndo,
   canRedo = false,
   onRedo,
-  onOpenStats,
-  isStatsActive = false,
 }) => {
   const isLight = theme === 'light';
 
   return (
     <div
-      className={`flex items-center justify-between gap-2 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm border-b overflow-x-auto whitespace-nowrap transition-colors select-none shrink-0 ${
+      className={`h-10 flex items-center justify-between gap-4 px-4 text-xs border-b overflow-x-auto whitespace-nowrap transition-colors select-none shrink-0 ${
         isLight
-          ? 'bg-slate-50 border-slate-200 text-slate-800'
-          : 'bg-slate-900 border-slate-800 text-slate-200'
+          ? 'bg-[#FAFAFA] border-zinc-200 text-zinc-700'
+          : 'bg-[#09090B] border-zinc-800 text-zinc-300'
       }`}
     >
-      {/* Movement Mode Small Buttons (平滑移動 / 吸附移動 / 節點八方對齊) */}
-      <div className="flex items-center gap-2">
-        <span
-          className={`text-xs font-medium mr-1 hidden sm:inline ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
-          }`}
-        >
-          移動模式:
-        </span>
+      {/* Left: Snap / Align / History */}
+      <div className="flex items-center gap-3 shrink-0">
+        {/* Segmented Movement Mode */}
         <div
-          className={`flex items-center p-1 rounded-xl border gap-1 shadow-inner transition-colors ${
+          className={`flex items-center p-0.5 rounded-md border gap-0.5 ${
             isLight
-              ? 'bg-slate-200/70 border-slate-300'
-              : 'bg-slate-950 border-slate-800'
+              ? 'bg-zinc-100 border-zinc-200'
+              : 'bg-zinc-900 border-zinc-800'
           }`}
         >
-          {/* 1. 平滑移動小按鈕 */}
           <button
+            type="button"
             onClick={() => {
               if (gridSnap) onToggleGridSnap();
             }}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               !gridSnap
-                ? 'bg-sky-600 text-white shadow-sm ring-1 ring-white/10 font-semibold'
+                ? isLight
+                  ? 'bg-white text-zinc-900 shadow-2xs'
+                  : 'bg-zinc-800 text-zinc-100'
                 : isLight
-                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                ? 'text-zinc-500 hover:text-zinc-900'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
             title="平滑自由移動模式 — 按住 Ctrl 可八方虛線對齊其他節點"
           >
             <Move className="w-3.5 h-3.5" />
-            <span>平滑移動</span>
+            <span>平滑</span>
           </button>
 
-          {/* 2. 吸附移動小按鈕 */}
           <button
+            type="button"
             onClick={() => {
               if (!gridSnap) onToggleGridSnap();
             }}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               gridSnap
-                ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-white/10 font-semibold'
+                ? isLight
+                  ? 'bg-white text-zinc-900 shadow-2xs'
+                  : 'bg-zinc-800 text-zinc-100'
                 : isLight
-                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                ? 'text-zinc-500 hover:text-zinc-900'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
             title="網格吸附移動模式 — 車站節點移動時依格點吸附"
           >
             <Grid className="w-3.5 h-3.5" />
-            <span>吸附移動</span>
+            <span>吸附</span>
           </button>
-
-          {/* 網格間距小按鈕 (當吸附移動時顯示) */}
-          {gridSnap && (
-            <div
-              className={`flex items-center rounded-md border text-[11px] overflow-hidden ml-0.5 ${
-                isLight
-                  ? 'bg-white border-slate-300 text-slate-700'
-                  : 'bg-slate-900 border-slate-700/60'
-              }`}
-            >
-              <button
-                onClick={() => onChangeGridSize(20)}
-                className={`px-1.5 py-0.5 transition-colors ${
-                  gridSize === 20
-                    ? 'bg-indigo-500 text-white font-bold'
-                    : isLight
-                    ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="20px 格點"
-              >
-                20px
-              </button>
-              <button
-                onClick={() => onChangeGridSize(40)}
-                className={`px-1.5 py-0.5 transition-colors ${
-                  gridSize === 40
-                    ? 'bg-indigo-500 text-white font-bold'
-                    : isLight
-                    ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="40px 格點"
-              >
-                40px
-              </button>
-            </div>
-          )}
-
-          {/* 3. 對齊模式小按鈕 (八方對齊 + 紅色虛線等距吸附) */}
-          {onToggleNodeAlign && (
-            <button
-              onClick={onToggleNodeAlign}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                nodeAlign
-                  ? isLight
-                    ? 'bg-rose-50 text-rose-700 border border-rose-300 font-semibold shadow-sm'
-                    : 'bg-rose-950/80 text-rose-300 border border-rose-500/50'
-                  : isLight
-                  ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
-              }`}
-              title="開啟對齊模式 (Ctrl) — 支援八方對齊與等距連線吸附（已有線段時，連線將出現紅色虛線保持線段等距，亦可按住 Ctrl 觸發）"
-            >
-              <Crosshair className={`w-3.5 h-3.5 ${nodeAlign ? 'text-rose-500' : isLight ? 'text-slate-600' : 'text-slate-400'}`} />
-              <span>對齊模式</span>
-              {nodeAlign && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-              )}
-              <span
-                className={`text-[10px] font-mono px-1 py-0.2 rounded border ${
-                  isLight
-                    ? 'bg-white text-slate-700 border-slate-300'
-                    : 'bg-slate-800 text-slate-300 border-slate-700'
-                }`}
-              >
-                Ctrl
-              </span>
-            </button>
-          )}
         </div>
 
-        {/* Undo / Redo History Buttons */}
-        <div
-          className={`flex items-center p-1 rounded-xl border gap-0.5 shadow-inner transition-colors ${
-            isLight
-              ? 'bg-slate-200/70 border-slate-300'
-              : 'bg-slate-950 border-slate-800'
-          }`}
-        >
+        {/* Grid Step Size (when Grid Snap is active) */}
+        {gridSnap && (
+          <div
+            className={`flex items-center p-0.5 rounded-md border text-[11px] font-mono ${
+              isLight
+                ? 'bg-zinc-100 border-zinc-200'
+                : 'bg-zinc-900 border-zinc-800'
+            }`}
+          >
+            {[20, 40].map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => onChangeGridSize(size)}
+                className={`px-2 py-0.5 rounded transition-colors cursor-pointer tabular-nums ${
+                  gridSize === size
+                    ? isLight
+                      ? 'bg-white text-zinc-900 font-semibold shadow-2xs'
+                      : 'bg-zinc-800 text-zinc-100 font-semibold'
+                    : isLight
+                    ? 'text-zinc-500 hover:text-zinc-900'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title={`${size} 格點間距`}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Eight-Way Alignment Toggle */}
+        {onToggleNodeAlign && (
           <button
+            type="button"
+            onClick={onToggleNodeAlign}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              nodeAlign
+                ? isLight
+                  ? 'bg-zinc-900 text-white border-zinc-900'
+                  : 'bg-zinc-100 text-zinc-900 border-zinc-100'
+                : isLight
+                ? 'bg-white text-zinc-600 border-zinc-200 hover:text-zinc-900 hover:bg-zinc-50'
+                : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-800'
+            }`}
+            title="開啟對齊模式 (Ctrl) — 支援八方對齊與等距連線吸附"
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+            <span>對齊</span>
+            <span className="text-[10px] font-mono opacity-65">Ctrl</span>
+          </button>
+        )}
+
+        <div className={`h-4 w-px ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+
+        {/* Undo / Redo */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
             onClick={onUndo}
             disabled={!canUndo}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
               !canUndo
-                ? 'opacity-35 cursor-not-allowed text-slate-400'
+                ? 'opacity-30 cursor-not-allowed'
                 : isLight
-                ? 'text-slate-700 hover:text-slate-950 hover:bg-white shadow-2xs cursor-pointer'
-                : 'text-slate-200 hover:text-white hover:bg-slate-850 cursor-pointer'
+                ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60 cursor-pointer'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 cursor-pointer'
             }`}
             title="復原上一步 (Ctrl+Z / ⌘Z)"
           >
@@ -220,14 +195,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={onRedo}
             disabled={!canRedo}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
               !canRedo
-                ? 'opacity-35 cursor-not-allowed text-slate-400'
+                ? 'opacity-30 cursor-not-allowed'
                 : isLight
-                ? 'text-slate-700 hover:text-slate-950 hover:bg-white shadow-2xs cursor-pointer'
-                : 'text-slate-200 hover:text-white hover:bg-slate-850 cursor-pointer'
+                ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60 cursor-pointer'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 cursor-pointer'
             }`}
             title="重做下一步 (Ctrl+Y / ⌘Y / ⌘⇧Z)"
           >
@@ -237,93 +213,41 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      {/* Right side: Stats & Action buttons */}
-      <div className="flex items-center gap-2">
+      {/* Right: Unboxed Network Counts & Canvas Actions */}
+      <div className="flex items-center gap-3 shrink-0">
         <div
-          className={`hidden lg:flex items-center gap-1.5 text-xs mr-2 ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
+          className={`hidden md:flex items-center gap-1.5 text-xs font-mono tabular-nums ${
+            isLight ? 'text-zinc-500' : 'text-zinc-400'
           }`}
         >
-          <span>
-            站點/節點: <strong className={`font-mono ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>{stationCount}</strong>
-          </span>
+          <span>{stationCount} 站</span>
           <span aria-hidden="true">·</span>
-          <span>
-            連線: <strong className={`font-mono ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>{connectionCount}</strong>
-          </span>
+          <span>{connectionCount} 段連線</span>
         </div>
 
-        {onOpenStats && (
-          <button
-            onClick={onOpenStats}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
-              isStatsActive
-                ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-xs'
-                : isLight
-                ? 'text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 border-indigo-200 shadow-2xs'
-                : 'text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 hover:text-white border-indigo-800/60'
-            }`}
-            title="開啟階段二路網統計面板與各色路線圓餅佔比圖表"
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>路網統計</span>
-            <span
-              className={`text-[9.5px] font-mono px-1 py-0.2 rounded border hidden sm:inline ${
-                isStatsActive
-                  ? 'bg-indigo-700 text-white border-indigo-500 font-bold'
-                  : isLight
-                  ? 'bg-white text-indigo-600 border-indigo-200'
-                  : 'bg-indigo-900/80 text-indigo-200 border-indigo-700/60'
-              }`}
-            >
-              二階
-            </span>
-          </button>
-        )}
-
-        {onOpenShortcuts && (
-          <button
-            onClick={onOpenShortcuts}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
-              isLight
-                ? 'text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 border-indigo-200 shadow-2xs'
-                : 'text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 hover:text-white border-indigo-800/60'
-            }`}
-            title="開啟快捷鍵說明 (按鍵盤 ? 或 F1 亦可開啟)"
-          >
-            <Keyboard className="w-3.5 h-3.5 text-indigo-500" />
-            <span>快捷鍵</span>
-            <kbd
-              className={`text-[10px] font-mono px-1 py-0.2 rounded border hidden sm:inline ${
-                isLight
-                  ? 'bg-white text-indigo-600 border-indigo-200'
-                  : 'bg-indigo-900/80 text-indigo-200 border-indigo-700/60'
-              }`}
-            >
-              ?
-            </kbd>
-          </button>
-        )}
+        <div className={`hidden md:block h-4 w-px ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
 
         <button
+          type="button"
           onClick={onLoadDemo}
-          className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
             isLight
-              ? 'text-slate-700 bg-white hover:bg-slate-100 hover:text-slate-900 border-slate-300 shadow-2xs'
-              : 'text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white border-slate-700/60'
+              ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60'
+              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
           title="載入台北捷運範例路網"
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>載入範例</span>
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span>範例路網</span>
         </button>
 
         <button
+          type="button"
           onClick={onClearCanvas}
-          className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border transition-colors ${
+          className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
             isLight
-              ? 'text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200'
-              : 'text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 border-transparent hover:border-rose-900/50'
+              ? 'text-zinc-500 hover:text-rose-600 hover:bg-rose-50'
+              : 'text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30'
           }`}
           title="清空畫布所有節點與連線"
         >
@@ -334,4 +258,3 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     </div>
   );
 };
-

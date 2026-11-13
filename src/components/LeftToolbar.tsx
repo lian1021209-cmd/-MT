@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  MousePointer, 
+import {
+  MousePointer,
   BoxSelect,
-  PlusCircle, 
+  PlusCircle,
   XCircle,
-  GitCommit, 
+  GitCommit,
   Pipette,
-  ChevronRight
 } from 'lucide-react';
 import { ToolMode, RouteType, EffectiveTheme } from '../types/metro';
 import { ROUTE_TYPE_OPTIONS } from './Toolbar';
@@ -34,7 +33,6 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   const [showRouteFlyout, setShowRouteFlyout] = useState(false);
   const flyoutRef = useRef<HTMLDivElement | null>(null);
 
-  // Close flyout on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (flyoutRef.current && !flyoutRef.current.contains(e.target as Node)) {
@@ -51,123 +49,97 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
 
   const activeOption = ROUTE_TYPE_OPTIONS.find((o) => o.type === activeRouteType) || ROUTE_TYPE_OPTIONS[0];
 
+  const getToolButtonClass = (active: boolean) =>
+    `w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+      active
+        ? isLight
+          ? 'bg-zinc-900 text-white'
+          : 'bg-zinc-100 text-zinc-900'
+        : isLight
+        ? 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'
+        : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80'
+    }`;
+
   return (
     <aside
       aria-label="工具列"
-      className={`relative w-13 sm:w-16 border-r flex flex-col items-center py-2 sm:py-3.5 px-1 sm:px-1.5 select-none shrink-0 h-full z-20 transition-colors ${
-        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+      className={`relative w-14 border-r flex flex-col items-center py-3 px-1.5 select-none shrink-0 h-full z-20 transition-colors ${
+        isLight ? 'bg-white border-zinc-200' : 'bg-[#111113] border-zinc-800'
       }`}
     >
-      <div
-        className={`text-[9px] sm:text-[10px] font-mono font-semibold mb-2 sm:mb-3 tracking-wider ${
-          isLight ? 'text-slate-500' : 'text-slate-500'
-        }`}
-      >
-        工具
-      </div>
-
       {/* Drawing Mode Tools */}
-      <div className="flex flex-col items-center gap-2 w-full">
-        {/* 1. Select / Move Tool */}
+      <div className="flex flex-col items-center gap-1.5 w-full">
         <button
+          type="button"
           onClick={() => {
             onSetToolMode('select');
             setShowRouteFlyout(false);
           }}
-          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all ${
-            toolMode === 'select'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-              : isLight
-              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
+          className={getToolButtonClass(toolMode === 'select')}
           title="選取 / 移動 (V) — 點擊選取或拖曳車站，按著空白畫布滑動"
         >
           <MousePointer className="w-4 h-4" />
-          <span className="text-[9px] font-medium mt-0.5 scale-90">選取</span>
+          <span className="text-[10px] font-medium leading-none">選取</span>
         </button>
 
-        {/* 1.5 Marquee Box Selection Tool */}
         <button
+          type="button"
           onClick={() => {
             onSetToolMode('marquee_select');
             setShowRouteFlyout(false);
           }}
-          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all ${
-            toolMode === 'marquee_select'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-              : isLight
-              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
-          title="框選多點 (S) — 拖曳滑鼠框選多個站點，或在選取模式按住 Shift 框選"
+          className={getToolButtonClass(toolMode === 'marquee_select')}
+          title="框選多點 (S) — 拖曳滑鼠框選多個站點（按住 Shift 可加選）"
         >
           <BoxSelect className="w-4 h-4" />
-          <span className="text-[9px] font-medium mt-0.5 scale-90">框選</span>
+          <span className="text-[10px] font-medium leading-none">框選</span>
         </button>
 
-        {/* 2. Create Node Tool */}
         <button
+          type="button"
           onClick={() => {
             onSetToolMode('add_station');
             setShowRouteFlyout(false);
           }}
-          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all ${
-            toolMode === 'add_station'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-white/20'
-              : isLight
-              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
+          className={getToolButtonClass(toolMode === 'add_station')}
           title="創造節點 (A) — 建立新車站後自動回到選取，按住 Shift 可連續建立"
         >
           <PlusCircle className="w-4 h-4" />
-          <span className="text-[9px] font-medium mt-0.5 scale-90">創造節點</span>
+          <span className="text-[10px] font-medium leading-none">車站</span>
         </button>
 
-        {/* 3. Virtual Node Tool */}
         <button
+          type="button"
           onClick={() => {
             onSetToolMode('add_virtual_node');
             setShowRouteFlyout(false);
           }}
-          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all ${
-            toolMode === 'add_virtual_node'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-white/20'
-              : isLight
-              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
-          title="虛擬節點 (X) — 建立非站點之連線/轉折/分岔虛擬節點，建立後自動回到選取，按住 Shift 可連續建立"
+          className={getToolButtonClass(toolMode === 'add_virtual_node')}
+          title="虛擬節點 (X) — 建立非站點之轉折虛擬節點，按住 Shift 可連續建立"
         >
           <XCircle className="w-4 h-4" />
-          <span className="text-[9px] font-medium mt-0.5 scale-90">虛擬節點</span>
+          <span className="text-[10px] font-medium leading-none">轉折</span>
         </button>
 
-        {/* 3. Connect Nodes Tool with route flyout toggle */}
+        {/* Connect Nodes Tool with route flyout */}
         <div className="relative w-full flex justify-center">
           <button
+            type="button"
             onClick={() => {
               onSetToolMode('connect');
               setShowRouteFlyout((v) => !v);
             }}
-            className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all relative ${
-              toolMode === 'connect'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-white/20'
-                : isLight
-                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-            title="節點連接 (C) — 點選兩車站連線（連完自動回到選取，按住 Shift 可連續連線）"
+            className={`${getToolButtonClass(toolMode === 'connect')} relative`}
+            title="節點連接 (C) — 點選兩車站連線（按住 Shift 可連續連線）"
           >
             <GitCommit className="w-4 h-4" />
-            <span className="text-[9px] font-medium mt-0.5 scale-90">節點連接</span>
+            <span className="text-[10px] font-medium leading-none">連線</span>
             {toolMode === 'connect' && (
               <span
-                className={`absolute -bottom-1 -right-1 text-[9px] font-mono font-bold px-1 rounded-full border ${
+                className={`absolute -bottom-0.5 -right-0.5 text-[9px] font-mono w-4 h-4 rounded flex items-center justify-center border ${
                   isLight
-                    ? 'bg-white text-indigo-700 border-slate-300'
-                    : 'bg-slate-950 text-indigo-300 border-slate-700'
+                    ? 'bg-white text-zinc-900 border-zinc-300'
+                    : 'bg-zinc-900 text-zinc-100 border-zinc-700'
                 }`}
               >
                 {activeOption.icon}
@@ -175,47 +147,47 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             )}
           </button>
 
-          {/* Flyout panel for the 6 line segment types */}
+          {/* Flyout panel for line segment styles */}
           {showRouteFlyout && (
             <div
               ref={flyoutRef}
-              className={`absolute left-full ml-2 top-0 z-50 w-56 rounded-xl shadow-2xl p-2 text-xs border animate-in fade-in zoom-in-95 ${
+              className={`absolute left-full ml-2 top-0 z-50 w-52 rounded-lg shadow-lg p-1.5 text-xs border ${
                 isLight
-                  ? 'bg-white border-slate-200 text-slate-800 shadow-slate-300/60'
-                  : 'bg-slate-900 border-slate-700 text-slate-200'
+                  ? 'bg-white border-zinc-200 text-zinc-800'
+                  : 'bg-[#111113] border-zinc-800 text-zinc-200'
               }`}
             >
               <div
-                className={`px-2 py-1 text-[11px] font-semibold border-b mb-1 flex items-center justify-between ${
-                  isLight ? 'text-slate-600 border-slate-200' : 'text-slate-400 border-slate-800'
+                className={`px-2 py-1.5 text-[11px] font-medium border-b mb-1 flex items-center justify-between ${
+                  isLight ? 'text-zinc-500 border-zinc-200' : 'text-zinc-400 border-zinc-800'
                 }`}
               >
-                <span>選擇線段連接模式</span>
-                <span className="text-indigo-500 font-mono text-[10px]">6 種走線</span>
+                <span>線段走線模式</span>
+                <span className="font-mono text-[10px] tabular-nums">6 種</span>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {ROUTE_TYPE_OPTIONS.map((opt) => (
                   <button
                     key={opt.type}
+                    type="button"
                     onClick={() => {
                       onChangeRouteType(opt.type);
                       setShowRouteFlyout(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-left transition-colors cursor-pointer ${
                       activeRouteType === opt.type
-                        ? 'bg-indigo-600 text-white font-medium'
+                        ? isLight
+                          ? 'bg-zinc-900 text-white font-medium'
+                          : 'bg-zinc-100 text-zinc-900 font-medium'
                         : isLight
-                        ? 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
-                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:bg-zinc-800'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm w-4 text-center">{opt.icon}</span>
                       <span>{opt.label}</span>
                     </div>
-                    {activeRouteType === opt.type && (
-                      <span className="text-[10px] font-mono">使用中</span>
-                    )}
                   </button>
                 ))}
               </div>
@@ -225,24 +197,24 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
       </div>
 
       {/* Divider */}
-      <div className={`w-8 h-px my-3 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+      <div className={`w-7 h-px my-3 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
 
-      {/* 4. Active Color Square (Opens 1/9th Spectrum Color Window) */}
+      {/* Active Color Swatch */}
       <div className="flex flex-col items-center gap-1.5 w-full">
-        <span className="text-[9px] font-mono text-slate-500 font-medium">
-          色彩
-        </span>
         <button
+          type="button"
           onClick={onOpenColorModal}
-          className="relative w-10 h-10 rounded-xl shadow-md border-2 border-white/70 hover:scale-105 active:scale-95 transition-all flex items-center justify-center group focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className={`relative w-9 h-9 rounded-lg border transition-transform hover:scale-105 active:scale-95 flex items-center justify-center group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+            isLight ? 'border-zinc-300' : 'border-zinc-700'
+          }`}
           style={{ backgroundColor: activeColor }}
-          title={`路線色彩設定 · 點擊開啟 16,777,216 色圖譜 (當前: ${activeColor})`}
+          title={`路線色彩設定 · 點擊開啟全色彩選擇器 (當前: ${activeColor})`}
         >
-          <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
-            <Pipette className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+          <div className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+            <Pipette className="w-3.5 h-3.5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </button>
-        <span className="text-[8px] font-mono text-slate-400 font-bold tracking-tighter truncate max-w-[50px]">
+        <span className={`text-[9px] font-mono tabular-nums tracking-tight truncate max-w-[46px] ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
           {activeColor}
         </span>
       </div>

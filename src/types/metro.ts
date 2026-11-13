@@ -37,6 +37,50 @@ export const LABEL_POSITION_PRESETS: Record<Exclude<LabelPosition, 'custom'>, La
   bottom_right: { label: '右下', short: '↘', dx: 15, dy: 20, textAnchor: 'start' },
 };
 
+export const MIN_Z_ORDER = -10;
+export const MAX_Z_ORDER = 10;
+
+export function clampZOrder(z: number): number {
+  if (!Number.isFinite(z)) return 0;
+  return Math.max(MIN_Z_ORDER, Math.min(MAX_Z_ORDER, Math.round(z)));
+}
+
+export function clampLineOffset(offset: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  const rounded = Math.round(offset * 2) / 2; // 0.5 precision, unlimited range
+  return rounded === 0 ? 0 : rounded;
+}
+
+export function normalizeSvgScale(val: number, min: number = 0.1): number {
+  if (!Number.isFinite(val)) return 1;
+  const rounded = Math.round(val * 100) / 100;
+  return Math.max(min, rounded);
+}
+
+export function normalizeSvgAngle(deg: number): number {
+  if (!Number.isFinite(deg)) return 0;
+  const wrapped = ((Math.round(deg * 10) / 10) % 360 + 360) % 360;
+  return wrapped === 360 ? 0 : wrapped;
+}
+
+export function normalizeStrokeWidth(val: number): number {
+  if (!Number.isFinite(val)) return 6;
+  return Math.max(0.5, Math.round(val * 2) / 2);
+}
+
+export function normalizeCornerRadius(val: number): number {
+  if (!Number.isFinite(val)) return 14;
+  return Math.max(0, Math.round(val * 2) / 2);
+}
+
+export function normalizeOpacity(val: number): number {
+  if (!Number.isFinite(val)) return 1;
+  return Math.max(0.05, Math.min(1, Math.round(val * 100) / 100));
+}
+
+export type StrokeStyle = 'solid' | 'dashed' | 'dotted' | 'double';
+export type LineCapStyle = 'round' | 'butt' | 'square';
+
 export interface Station {
   id: string;
   name: string;
@@ -49,6 +93,14 @@ export interface Station {
   labelPosition?: LabelPosition;
   labelOffset?: Point; // 自由站名拖動時的相對位移 (dx, dy)
   isVirtual?: boolean; // 虛擬節點：非站點，用於線路轉折、分岔與連線
+  zIndex?: number; // SVG 重疊層級 (-10 ~ 10，預設 0，數值越大越在上層)
+  scale?: number; // 階段三 SVG 自由變換：整體縮放倍率 (預設 1，無上限)
+  scaleX?: number; // 階段三 SVG 自由變換：水平獨立拉伸倍率 (預設 1)
+  scaleY?: number; // 階段三 SVG 自由變換：垂直獨立拉伸倍率 (預設 1)
+  rotation?: number; // 階段三 SVG 自由變換：自由旋轉角度 (0 ~ 359°)
+  labelScale?: number; // 階段三 SVG 自由變換：站名標籤字級縮放倍率 (預設 1)
+  labelRotation?: number; // 階段三 SVG 自由變換：站名標籤旋轉角度 (0 ~ 359°)
+  opacity?: number; // 階段三 SVG 自由變換：不透明度 (0.05 ~ 1，預設 1)
 }
 
 export interface MetroLine {
@@ -78,6 +130,13 @@ export interface Connection {
   angleA?: number;     // 任意角度線段：線段 A 360° 旋轉角度 (0 ~ 359°)
   angleB?: number;     // 任意角度線段：線段 B 360° 旋轉角度 (0 ~ 359°)
   lineId?: string;
+  zIndex?: number;     // SVG 重疊層級 (-10 ~ 10，預設 0，數值越大越在上層)
+  offset?: number;     // 線段平行偏移量 (無限制，達成並線效果)
+  strokeWidth?: number; // 階段三 SVG 自由變換：線條粗細 (預設 6，無上限)
+  cornerRadius?: number; // 階段三 SVG 自由變換：轉角圓角半徑 (預設 14，無上限)
+  strokeStyle?: StrokeStyle; // 階段三 SVG 自由變換：實線 / 虛線 / 點線 / 雙軌
+  lineCap?: LineCapStyle; // 階段三 SVG 自由變換：端點樣式
+  opacity?: number; // 階段三 SVG 自由變換：不透明度 (0.05 ~ 1，預設 1)
 }
 
 export type ToolMode = 'select' | 'marquee_select' | 'pan' | 'add_station' | 'add_virtual_node' | 'connect';

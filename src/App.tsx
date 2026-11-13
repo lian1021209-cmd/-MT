@@ -12,7 +12,9 @@ import {
   RouteType, 
   Point,
   ThemeMode,
-  EffectiveTheme
+  EffectiveTheme,
+  clampZOrder,
+  clampLineOffset
 } from './types/metro';
 import { DEFAULT_LINES, DEMO_STATIONS, DEMO_CONNECTIONS } from './data/initialData';
 import { MetroCanvas } from './components/MetroCanvas';
@@ -22,19 +24,14 @@ import { ColorModal } from './components/ColorModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { ExportModal } from './components/ExportModal';
 import { Sidebar } from './components/Sidebar';
-import { 
-  TrainTrack, 
-  Download, 
-  Sun, 
-  Moon, 
-  Clock, 
-  Save, 
-  Image as ImageIcon, 
-  ChevronDown, 
-  Check,
-  FileText
+import {
+  TrainTrack,
+  Download,
+  Sun,
+  Moon,
+  Clock,
+  Save,
 } from 'lucide-react';
-import { exportMetroCanvasToPng, triggerPngDownload } from './utils/exportImage';
 import { ShortestPathResult } from './utils/pathfinding';
 
 const STORAGE_KEY = 'metro_network_data';
@@ -285,6 +282,10 @@ export default function App() {
 
   const isLight = effectiveTheme === 'light';
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', !isLight);
+  }, [isLight]);
+
   // Active color & Recent 20 colors history (initially empty until colors are used)
   const [activeColor, setActiveColor] = useState<string>('#E11D48');
   const [recentColors, setRecentColors] = useState<string[]>([]);
@@ -292,8 +293,6 @@ export default function App() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [exportModalFormat, setExportModalFormat] = useState<'pdf' | 'png'>('pdf');
-  const [isExportingPNG, setIsExportingPNG] = useState<boolean>(false);
-  const [pngExportSuccess, setPngExportSuccess] = useState<boolean>(false);
   const [shortestPathResult, setShortestPathResult] = useState<ShortestPathResult | null>(null);
   const [showPathPreview, setShowPathPreview] = useState<boolean>(true);
 
@@ -323,7 +322,7 @@ export default function App() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [selectedStationIds, setSelectedStationIds] = useState<string[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'inspector' | 'stats'>('inspector');
+  const [sidebarTab, setSidebarTab] = useState<'inspector' | 'stats' | 'routing'>('inspector');
 
   const [gridSnap, setGridSnap] = useState<boolean>(true);
   const [gridSize, setGridSize] = useState<number>(20);
@@ -369,6 +368,23 @@ export default function App() {
     );
   };
 
+  const handleUpdateStationLive = (updated: Station) => {
+    setStations((prev) =>
+      prev.map((st) => (st.id === updated.id ? updated : st))
+    );
+  };
+
+  const handleBatchUpdateStations = (updates: Array<{ id: string } & Partial<Station>>) => {
+    if (updates.length === 0) return;
+    const map = new Map(updates.map((u) => [u.id, u]));
+    setStations((prev) =>
+      prev.map((st) => {
+        const u = map.get(st.id);
+        return u ? { ...st, ...u } : st;
+      })
+    );
+  };
+
   const handleDeleteStation = (id: string) => {
     pushHistory();
     setStations((prev) => prev.filter((st) => st.id !== id));
@@ -410,7 +426,7 @@ export default function App() {
     );
   };
 
-  // Connection Handlers
+  // Connection Handlers (支援同一站點對之間建立多條平行並線並自動計算偏移)
   const handleAddConnection = (
     fromId: string, 
     toId: string, 
@@ -420,27 +436,67 @@ export default function App() {
   ) => {
     if (fromId === toId) return;
 
-    // Check duplicate
-    const exists = connections.some(
+    pushHistory();
+
+    const pairConns = connections.filter(
       (c) =>
         (c.fromStationId === fromId && c.toStationId === toId) ||
         (c.fromStationId === toId && c.toStationId === fromId)
     );
 
-    if (exists) return;
+    const canonFrom = fromId < toId ? fromId : toId;
+    const isNewCanon = fromId === canonFrom;
 
-    pushHistory();
+    let newOffset = 0;
+    let updatedExisting = connections;
+
+    if (pairConns.length === 1 && Math.abs(pairConns[0].offset ?? 0) < 0.05) {
+      // Auto-spread first pair cleanly into -4px and +4px parallel tracks (並線)
+      const first = pairConns[0];
+      const firstSign = first.fromStationId === canonFrom ? 1 : -1;
+      const newSign = isNewCanon ? 1 : -1;
+      updatedExisting = connections.map((c) =>
+        c.id === first.id ? { ...c, offset: -4 * firstSign } : c
+      );
+      newOffset = 4 * newSign;
+    } else if (pairConns.length >= 1) {
+      // Pick next unused canonical slot (unlimited alternating multiples of 4px)
+      const usedCanonOffsets = pairConns.map((c) => {
+        const sign = c.fromStationId === canonFrom ? 1 : -1;
+        return (c.offset ?? 0) * sign;
+      });
+      let freeSlot = 0;
+      for (let step = 0; step <= pairConns.length + 2; step++) {
+        const candidates = step === 0 ? [0] : [step * 4, -step * 4];
+        const found = candidates.find((slot) =>
+          usedCanonOffsets.every((used) => Math.abs(used - slot) >= 3.5)
+        );
+        if (found !== undefined) {
+          freeSlot = found;
+          break;
+        }
+      }
+      const newSign = isNewCanon ? 1 : -1;
+      newOffset = clampLineOffset(freeSlot * newSign);
+    }
 
     const newConn: Connection = {
       id: `conn-${Date.now()}`,
       fromStationId: fromId,
       toStationId: toId,
       color,
-      routeType,
+      routeType: pairConns.length > 0 && !waypoints ? (pairConns[0].routeType || routeType) : routeType,
+      isFlipped:
+        pairConns.length > 0
+          ? pairConns[0].fromStationId === fromId
+            ? pairConns[0].isFlipped
+            : !pairConns[0].isFlipped
+          : undefined,
       waypoints,
+      offset: newOffset,
     };
 
-    const nextConnections = [...connections, newConn];
+    const nextConnections = [...updatedExisting, newConn];
     setConnections(nextConnections);
     setSelectedConnectionId(newConn.id);
     handleSelectColor(color);
@@ -493,6 +549,129 @@ export default function App() {
               ...(angleB !== undefined ? { angleB } : {}),
             }
           : c
+      )
+    );
+  };
+
+  const handleUpdateConnectionZIndex = (connId: string, zIndex: number) => {
+    const clamped = clampZOrder(zIndex);
+    const current = connections.find((c) => c.id === connId);
+    if (!current || (current.zIndex ?? 0) === clamped) return;
+    pushHistory();
+    setConnections((prev) =>
+      prev.map((c) => (c.id === connId ? { ...c, zIndex: clamped } : c))
+    );
+  };
+
+  const handleUpdateConnectionOffset = (connId: string, offset: number) => {
+    const clamped = clampLineOffset(offset);
+    const current = connections.find((c) => c.id === connId);
+    if (!current || (current.offset ?? 0) === clamped) return;
+    pushHistory();
+    setConnections((prev) =>
+      prev.map((c) => (c.id === connId ? { ...c, offset: clamped } : c))
+    );
+  };
+
+  const handleUpdateConnectionStyle = (connId: string, patch: Partial<Connection>) => {
+    pushHistory();
+    setConnections((prev) =>
+      prev.map((c) => (c.id === connId ? { ...c, ...patch } : c))
+    );
+  };
+
+  const handleUpdateConnectionStyleLive = (connId: string, patch: Partial<Connection>) => {
+    setConnections((prev) =>
+      prev.map((c) => (c.id === connId ? { ...c, ...patch } : c))
+    );
+  };
+
+  const handleDuplicateParallelConnection = (connId: string) => {
+    const source = connections.find((c) => c.id === connId);
+    if (!source) return;
+
+    // Pick activeColor if different from source, otherwise choose a distinct metro palette color
+    const PALETTE = ['#2563EB', '#E11D48', '#16A34A', '#EA580C', '#9333EA', '#CA8A04', '#06B6D4'];
+    const pairConns = connections.filter(
+      (c) =>
+        (c.fromStationId === source.fromStationId && c.toStationId === source.toStationId) ||
+        (c.fromStationId === source.toStationId && c.toStationId === source.fromStationId)
+    );
+    const usedColors = new Set(pairConns.map((c) => (c.color || '').toUpperCase()));
+    let nextColor = activeColor;
+    if (usedColors.has(nextColor.toUpperCase())) {
+      nextColor = PALETTE.find((p) => !usedColors.has(p.toUpperCase())) || activeColor;
+    }
+
+    handleAddConnection(
+      source.fromStationId,
+      source.toStationId,
+      nextColor,
+      source.routeType || '135_bend',
+      source.waypoints ? [...source.waypoints] : undefined
+    );
+  };
+
+  const handleAutoBundleConnections = (connId: string, spacing: number = 8) => {
+    const target = connections.find((c) => c.id === connId);
+    if (!target) return;
+
+    const a = target.fromStationId;
+    const b = target.toStationId;
+    const canonFrom = a < b ? a : b;
+
+    const pairConns = connections.filter(
+      (c) =>
+        (c.fromStationId === a && c.toStationId === b) ||
+        (c.fromStationId === b && c.toStationId === a)
+    );
+    if (pairConns.length < 2) return;
+
+    pushHistory();
+
+    const n = pairConns.length;
+    const offsetById = new Map<string, number>();
+    pairConns.forEach((c, idx) => {
+      const canonSlot = (idx - (n - 1) / 2) * spacing;
+      const sign = c.fromStationId === canonFrom ? 1 : -1;
+      offsetById.set(c.id, clampLineOffset(canonSlot * sign));
+    });
+
+    setConnections((prev) =>
+      prev.map((c) => {
+        if (!offsetById.has(c.id)) return c;
+        // Align routeType & flip direction with the selected reference connection so parallel curves match cleanly
+        const sameDir = c.fromStationId === target.fromStationId;
+        return {
+          ...c,
+          offset: offsetById.get(c.id),
+          routeType: target.routeType,
+          isFlipped: sameDir ? target.isFlipped : !target.isFlipped,
+          ...(target.routeType === 'free_curve' && target.waypoints ? { waypoints: [...target.waypoints] } : {}),
+        };
+      })
+    );
+  };
+
+  const handleUpdateStationZIndex = (stationId: string, zIndex: number) => {
+    const clamped = clampZOrder(zIndex);
+    const current = stations.find((s) => s.id === stationId);
+    if (!current || (current.zIndex ?? 0) === clamped) return;
+    pushHistory();
+    setStations((prev) =>
+      prev.map((st) => (st.id === stationId ? { ...st, zIndex: clamped } : st))
+    );
+  };
+
+  const handleBatchUpdateStationsZIndex = (stationIds: string[], delta: number) => {
+    if (stationIds.length === 0 || delta === 0) return;
+    const idSet = new Set(stationIds);
+    pushHistory();
+    setStations((prev) =>
+      prev.map((st) =>
+        idSet.has(st.id)
+          ? { ...st, zIndex: clampZOrder((st.zIndex ?? 0) + delta) }
+          : st
       )
     );
   };
@@ -562,281 +741,185 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Export to PNG Image using canvas.toDataURL() as requested
-  const handleExportPNG = async () => {
-    const svg = document.getElementById('metro-canvas-svg') as SVGSVGElement | null;
-    if (!svg) {
-      console.warn('MetroCanvas SVG element not found');
-      return;
-    }
-
-    setIsExportingPNG(true);
-    try {
-      const result = await exportMetroCanvasToPng(svg, stations, connections, {
-        scope: 'full',
-        scale: 2, // 2x high resolution Retina scale
-        background: 'theme',
-        theme: effectiveTheme,
-      });
-
-      // Directly trigger image download using the dataUrl generated via canvas.toDataURL()
-      triggerPngDownload(result.dataUrl, `metro-map-${Date.now()}.png`);
-      setPngExportSuccess(true);
-      setTimeout(() => setPngExportSuccess(false), 2500);
-    } catch (err) {
-      console.error('Failed to export PNG image:', err);
-    } finally {
-      setIsExportingPNG(false);
-    }
-  };
-
   const selectedStation = stations.find((s) => s.id === selectedStationId) || null;
   const selectedConnection = connections.find((c) => c.id === selectedConnectionId) || null;
 
   return (
     <div
       className={`flex flex-col h-screen w-screen overflow-hidden font-sans transition-colors ${
-        isLight ? 'bg-[#F8FAFC] text-slate-850' : 'bg-slate-950 text-slate-100'
+        isLight ? 'bg-[#FAFAFA] text-zinc-900' : 'bg-[#09090B] text-zinc-100'
       }`}
     >
-      {/* Top Bar following Top Bar Contract: Brand - Nav - Primary Action */}
+      {/* Minimalist 3-Zone Top Bar */}
       <header
-        className={`flex items-center justify-between gap-6 px-6 py-2.5 border-b shrink-0 transition-colors ${
+        className={`h-12 flex items-center justify-between gap-8 px-5 border-b shrink-0 transition-colors ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-800 shadow-2xs'
-            : 'bg-slate-900 border-slate-800 text-slate-100'
+            ? 'bg-white border-zinc-200 text-zinc-900'
+            : 'bg-[#111113] border-zinc-800 text-zinc-100'
         }`}
       >
-        <div className="flex items-center gap-3 whitespace-nowrap shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-sm">
-            <TrainTrack className="w-4 h-4" />
-          </div>
-          <span className={`text-base font-bold tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+        {/* Zone 1: Single-line Brand */}
+        <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
+          <TrainTrack className="w-4 h-4 text-zinc-900 dark:text-zinc-100" />
+          <span className="text-sm font-semibold tracking-tight">
             地鐵路網繪製器
-          </span>
-          <span
-            className={`text-xs border rounded-md px-2 py-0.5 ml-1 font-medium ${
-              isLight
-                ? 'text-indigo-700 border-indigo-200 bg-indigo-50 font-semibold'
-                : 'text-indigo-300 border-indigo-800/80 bg-indigo-950/60 font-semibold'
-            }`}
-          >
-            階段二：路網統計分析
           </span>
         </div>
 
+        {/* Zone 2: Clean Single-Line Nav Links */}
         <nav
-          className={`hidden md:flex items-center gap-4 text-xs font-medium ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
+          className={`hidden md:flex items-center gap-6 text-xs font-medium ${
+            isLight ? 'text-zinc-500' : 'text-zinc-400'
           }`}
         >
           <button
             type="button"
             onClick={() => setSidebarTab('inspector')}
-            className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+            className={`py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
               sidebarTab === 'inspector'
-                ? 'text-indigo-600 font-bold bg-indigo-50/70 dark:bg-indigo-950/50'
-                : isLight
-                ? 'hover:text-slate-900'
-                : 'hover:text-slate-200'
+                ? isLight
+                  ? 'text-zinc-900 border-zinc-900 font-semibold'
+                  : 'text-zinc-100 border-zinc-100 font-semibold'
+                : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
-            01. 基礎屬性檢視
+            屬性檢視
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidebarTab('routing')}
+            className={`py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+              sidebarTab === 'routing'
+                ? isLight
+                  ? 'text-zinc-900 border-zinc-900 font-semibold'
+                  : 'text-zinc-100 border-zinc-100 font-semibold'
+                : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
+            }`}
+          >
+            路徑規劃
           </button>
           <button
             type="button"
             onClick={() => setSidebarTab('stats')}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md transition-colors cursor-pointer ${
+            className={`py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
               sidebarTab === 'stats'
-                ? 'text-indigo-600 font-bold bg-indigo-50/70 dark:bg-indigo-950/50'
-                : isLight
-                ? 'hover:text-slate-900'
-                : 'hover:text-slate-200'
+                ? isLight
+                  ? 'text-zinc-900 border-zinc-900 font-semibold'
+                  : 'text-zinc-100 border-zinc-100 font-semibold'
+                : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
-            <span>02. 路網統計</span>
-            <span className="text-[10px] px-1 py-0.2 rounded bg-indigo-600 text-white font-mono font-bold">
-              二階
-            </span>
+            路網統計
           </button>
-          <span className="text-slate-300 dark:text-slate-700">·</span>
-          <span className={`${isLight ? 'hover:text-slate-900' : 'hover:text-slate-200'} transition-colors cursor-default`}>
-            03. 路網進階分析
-          </span>
-          <span className="text-slate-300 dark:text-slate-700">·</span>
           <button
             type="button"
-            onClick={() => setIsExportModalOpen(true)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors cursor-pointer ${
-              isLight ? 'hover:bg-slate-100 hover:text-emerald-700' : 'hover:bg-slate-800 hover:text-emerald-400'
-            }`}
-            title="開啟匯出面板：匯出 PNG 高畫質圖片或 JSON 資料"
+            onClick={() => setIsShortcutsOpen(true)}
+            className="py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 border-b-2 border-transparent hover:text-zinc-900 dark:hover:text-zinc-200"
           >
-            <span>04. 匯出與分享</span>
-            <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-mono font-bold">
-              PNG
-            </span>
+            快捷鍵
           </button>
         </nav>
 
+        {/* Zone 3: Theme Switch, Save & Primary Export Action */}
         <div className="flex items-center gap-2.5 shrink-0">
-          {/* Theme Mode Segmented Controller (黑白模式自由切換 + 自動判定時間模式) */}
+          {/* Theme Segmented Control */}
           <div
-            className={`flex items-center p-1 rounded-xl border text-xs gap-0.5 transition-colors ${
-              isLight ? 'bg-slate-100 border-slate-300' : 'bg-slate-950 border-slate-800'
+            className={`flex items-center p-0.5 rounded-md border text-xs ${
+              isLight ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-900 border-zinc-800'
             }`}
           >
-            {/* 1. 亮色模式 (白色模式) */}
             <button
+              type="button"
               onClick={() => handleSetThemeMode('light')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                 themeMode === 'light'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                  ? isLight
+                    ? 'bg-white text-zinc-900 shadow-2xs font-semibold'
+                    : 'bg-zinc-800 text-zinc-100 font-semibold'
                   : isLight
-                  ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                  ? 'text-zinc-500 hover:text-zinc-900'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title="白色模式 (淺色主題)"
+              title="淺色主題"
             >
               <Sun className="w-3.5 h-3.5" />
-              <span>亮色</span>
+              <span className="hidden sm:inline">亮</span>
             </button>
 
-            {/* 2. 暗色模式 (黑夜模式) */}
             <button
+              type="button"
               onClick={() => handleSetThemeMode('dark')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                 themeMode === 'dark'
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  ? isLight
+                    ? 'bg-white text-zinc-900 shadow-2xs font-semibold'
+                    : 'bg-zinc-800 text-zinc-100 font-semibold'
                   : isLight
-                  ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                  ? 'text-zinc-500 hover:text-zinc-900'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title="黑夜模式 (深色主題)"
+              title="深色主題"
             >
               <Moon className="w-3.5 h-3.5" />
-              <span>暗色</span>
+              <span className="hidden sm:inline">暗</span>
             </button>
 
-            {/* 3. 自動時控模式 (06:00 - 18:00 白天白色模式，其餘黑夜模式) */}
             <button
+              type="button"
               onClick={() => handleSetThemeMode('auto')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                 themeMode === 'auto'
                   ? isLight
-                    ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                    : 'bg-sky-600 text-white font-bold shadow-xs'
+                    ? 'bg-white text-zinc-900 shadow-2xs font-semibold'
+                    : 'bg-zinc-800 text-zinc-100 font-semibold'
                   : isLight
-                  ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                  ? 'text-zinc-500 hover:text-zinc-900'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title={`自動時控模式：上午 6 點至下午 6 點 (06:00-18:00) 為白色模式，其餘為黑夜模式（當前狀態：${
-                effectiveTheme === 'light' ? '白色模式 ☀️ 白天' : '黑夜模式 🌙 夜晚'
-              }）`}
+              title="自動時控 (06:00-18:00 淺色，其餘深色)"
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>自動</span>
-              {themeMode === 'auto' && (
-                <span className="text-[10px] opacity-90 font-mono ml-0.5">
-                  ({effectiveTheme === 'light' ? '06-18 白' : '18-06 夜'})
-                </span>
-              )}
+              <span className="hidden sm:inline">自動</span>
             </button>
           </div>
 
-          {/* Auto-save Status Indicator (每 30 秒自動保存至 localStorage) */}
+          {/* Quiet Manual Save */}
           <button
             type="button"
             onClick={saveToLocalStorage}
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all border cursor-pointer select-none ${
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
               isLight
-                ? 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 shadow-2xs'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
-            title="系統每 30 秒自動儲存路網至瀏覽器 (localStorage)。點擊可立即手動儲存。"
+            title="系統每 30 秒自動儲存，點擊立即儲存"
           >
-            {isSaving ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                <span className="text-[11px] text-amber-500 font-semibold">儲存中...</span>
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="text-[11px] text-slate-600 dark:text-slate-300 font-sans">
-                  {lastSavedTime
-                    ? `已儲存 ${lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                    : '每 30 秒自動保存'}
-                </span>
-                <Save className="w-3 h-3 opacity-60 ml-0.5" />
-              </>
-            )}
+            <Save className="w-3.5 h-3.5" />
+            <span className="font-mono text-[11px] tabular-nums">
+              {isSaving
+                ? '儲存中'
+                : lastSavedTime
+                ? lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : '儲存'}
+            </span>
           </button>
 
-          {/* Export PDF Button (利用 jsPDF 向量文件匯出) */}
+          {/* Primary Export CTA */}
           <button
             type="button"
             onClick={() => {
               setExportModalFormat('pdf');
               setIsExportModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 rounded-lg transition-all shadow-sm whitespace-nowrap cursor-pointer active:scale-[0.98]"
-            title="利用 jsPDF 庫將 MetroCanvas 轉為向量 PDF 文件，支援高品質列印與分享"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>匯出 PDF</span>
-          </button>
-
-          {/* Export to PNG Image Button (利用 canvas.toDataURL 下載) */}
-          <div className="flex items-center rounded-lg shadow-sm">
-            <button
-              type="button"
-              onClick={handleExportPNG}
-              disabled={isExportingPNG}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-l-lg transition-all shadow-sm whitespace-nowrap cursor-pointer ${
-                pngExportSuccess
-                  ? 'bg-emerald-600 hover:bg-emerald-500'
-                  : 'bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98]'
-              } ${isExportingPNG ? 'opacity-80 cursor-wait' : ''}`}
-              title="利用 canvas.toDataURL() 將目前畫布轉為 PNG 圖片下載"
-            >
-              {isExportingPNG ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>轉圖中...</span>
-                </>
-              ) : pngExportSuccess ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-200" />
-                  <span>已下載 PNG！</span>
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  <span>匯出 PNG</span>
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setExportModalFormat('png');
-                setIsExportModalOpen(true);
-              }}
-              className="px-1.5 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-600 border-l border-emerald-500/40 rounded-r-lg transition-colors cursor-pointer"
-              title="開啟進階匯出選項 (自訂範圍/背景/解析度)"
-            >
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <button
-            onClick={handleExportJSON}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm whitespace-nowrap cursor-pointer"
-            title="匯出完整路網資料結構為 JSON 檔案"
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              isLight
+                ? 'bg-zinc-900 hover:bg-zinc-800 text-white'
+                : 'bg-zinc-100 hover:bg-white text-zinc-900'
+            }`}
+            title="開啟匯出面板 (PDF / PNG / JSON)"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>匯出資料</span>
+            <span>匯出</span>
           </button>
         </div>
       </header>
@@ -861,6 +944,8 @@ export default function App() {
         onRedo={handleRedo}
         onOpenStats={() => setSidebarTab((prev) => (prev === 'stats' ? 'inspector' : 'stats'))}
         isStatsActive={sidebarTab === 'stats'}
+        onOpenRouting={() => setSidebarTab((prev) => (prev === 'routing' ? 'inspector' : 'routing'))}
+        isRoutingActive={sidebarTab === 'routing'}
       />
 
       {/* Main Workspace: Left Toolbar + Infinite Canvas + Right Inspector Sidebar */}
@@ -952,10 +1037,16 @@ export default function App() {
           onAddStation={handleAddStation}
           onUpdateStationPos={handleUpdateStationPos}
           onUpdateStationsPos={handleUpdateStationsPos}
+          onBatchUpdateStations={handleBatchUpdateStations}
           onBatchDeleteStations={handleBatchDeleteStations}
-          onUpdateStation={handleUpdateStation}
+          onUpdateStation={handleUpdateStationLive}
           onAddConnection={handleAddConnection}
           onUpdateConnectionWaypoints={handleUpdateConnectionWaypoints}
+          onUpdateStationZIndex={handleUpdateStationZIndex}
+          onBatchUpdateStationsZIndex={handleBatchUpdateStationsZIndex}
+          onUpdateConnectionZIndex={handleUpdateConnectionZIndex}
+          onUpdateConnectionOffset={handleUpdateConnectionOffset}
+          onUpdateConnectionStyle={handleUpdateConnectionStyleLive}
           onDeleteSelected={handleDeleteSelected}
           onRecordHistory={pushHistory}
           theme={effectiveTheme}
@@ -963,8 +1054,8 @@ export default function App() {
           showShortestPathPreview={showPathPreview}
         />
 
-        {/* Mobile Backdrop when Inspector or Stats Drawer is open */}
-        {(selectedStation || selectedConnection || sidebarTab === 'stats') && (
+        {/* Mobile Backdrop when Inspector, Routing, or Stats Drawer is open */}
+        {(selectedStation || selectedConnection || sidebarTab === 'stats' || sidebarTab === 'routing') && (
           <div
             className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-2xs transition-opacity"
             onClick={() => {
@@ -993,12 +1084,25 @@ export default function App() {
               setSelectedStationIds([]);
             }
           }}
+          onSelectConnection={(id) => {
+            setSelectedConnectionId(id);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+            }
+          }}
           onUpdateStation={handleUpdateStation}
           onDeleteStation={handleDeleteStation}
           onUpdateConnectionColor={handleUpdateConnectionColor}
           onUpdateConnectionRouteType={handleUpdateConnectionRouteType}
           onToggleConnectionFlip={handleToggleConnectionFlip}
           onUpdateConnectionAngles={handleUpdateConnectionAngles}
+          onUpdateConnectionZIndex={handleUpdateConnectionZIndex}
+          onUpdateConnectionOffset={handleUpdateConnectionOffset}
+          onUpdateConnectionStyle={handleUpdateConnectionStyle}
+          onDuplicateParallelConnection={handleDuplicateParallelConnection}
+          onAutoBundleConnections={handleAutoBundleConnections}
+          onUpdateStationZIndex={handleUpdateStationZIndex}
           onDeleteConnection={handleDeleteConnection}
           theme={effectiveTheme}
           onClose={() => {

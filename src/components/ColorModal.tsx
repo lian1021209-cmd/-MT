@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Pipette, Check, Hash, X, History, Sliders } from 'lucide-react';
+import { Check, Hash, X } from 'lucide-react';
 import { hexToHsv, hsvToHex, isValidHex, normalizeHex } from '../utils/color';
 import { EffectiveTheme } from '../types/metro';
 
@@ -21,7 +21,6 @@ export const ColorModal: React.FC<ColorModalProps> = ({
   theme = 'dark',
 }) => {
   const isLight = theme === 'light';
-  // HSV state to cover all 16,777,216 colors
   const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>(() =>
     hexToHsv(activeColor)
   );
@@ -32,14 +31,12 @@ export const ColorModal: React.FC<ColorModalProps> = ({
   const spectrumRef = useRef<HTMLDivElement | null>(null);
   const hueSliderRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync internal state when activeColor changes from external
   useEffect(() => {
     setHsv(hexToHsv(activeColor));
     setHexInput(activeColor);
     setInputError(false);
   }, [activeColor]);
 
-  // Handle ESC key and outside click to close
   useEffect(() => {
     if (!isOpen) return;
 
@@ -61,10 +58,8 @@ export const ColorModal: React.FC<ColorModalProps> = ({
     };
   }, [isOpen, onClose]);
 
-  // Derived current color from HSV
   const currentColorHex = hsvToHex(hsv.h, hsv.s, hsv.v);
 
-  // 2D Saturation & Brightness spectrum interaction
   const handleSpectrumPointer = useCallback((e: PointerEvent | React.PointerEvent) => {
     if (!spectrumRef.current) return;
     const rect = spectrumRef.current.getBoundingClientRect();
@@ -101,7 +96,6 @@ export const ColorModal: React.FC<ColorModalProps> = ({
     window.addEventListener('pointerup', onPointerUp);
   };
 
-  // 1D Hue slider interaction (0 - 360 deg)
   const handleHuePointer = useCallback((e: PointerEvent | React.PointerEvent) => {
     if (!hueSliderRef.current) return;
     const rect = hueSliderRef.current.getBoundingClientRect();
@@ -134,7 +128,6 @@ export const ColorModal: React.FC<ColorModalProps> = ({
     window.addEventListener('pointerup', onPointerUp);
   };
 
-  // Hex input change
   const handleHexInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.trim();
     if (!val.startsWith('#') && val.length > 0) val = '#' + val;
@@ -149,7 +142,6 @@ export const ColorModal: React.FC<ColorModalProps> = ({
     }
   };
 
-  // Confirm selection
   const handleApplyColor = (colorToApply?: string) => {
     const finalHex = colorToApply ? normalizeHex(colorToApply) : normalizeHex(hexInput);
     if (isValidHex(finalHex)) {
@@ -162,41 +154,38 @@ export const ColorModal: React.FC<ColorModalProps> = ({
 
   if (!isOpen) return null;
 
+  const borderCol = isLight ? 'border-zinc-200' : 'border-zinc-800';
+  const textHeading = isLight ? 'text-zinc-900' : 'text-zinc-100';
+  const textMuted = isLight ? 'text-zinc-500' : 'text-zinc-400';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-xs select-none">
-      {/* Window occupying approximately 1/9th of typical desktop screen (~34vw) */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-2xs select-none">
       <div
         ref={modalRef}
-        className={`w-[34vw] min-w-[360px] max-w-[460px] rounded-2xl shadow-2xl overflow-hidden flex flex-col border animate-in fade-in zoom-in-95 duration-150 transition-colors ${
+        className={`w-full max-w-[400px] rounded-xl shadow-2xl overflow-hidden flex flex-col border transition-colors ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-800 shadow-slate-300/60'
-            : 'bg-slate-900 border-slate-700/80 text-slate-200'
+            ? 'bg-white border-zinc-200 text-zinc-800'
+            : 'bg-[#111113] border-zinc-800 text-zinc-200'
         }`}
       >
         {/* Header */}
-        <div
-          className={`flex items-center justify-between px-5 py-3 border-b transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200'
-              : 'bg-slate-950/80 border-slate-800'
-          }`}
-        >
+        <div className={`flex items-center justify-between px-5 py-3.5 border-b ${borderCol}`}>
           <div className="flex items-center gap-2.5">
             <div
-              className="w-4 h-4 rounded-md border border-white/60 shadow-xs"
+              className={`w-4 h-4 rounded border ${isLight ? 'border-zinc-300' : 'border-zinc-700'}`}
               style={{ backgroundColor: currentColorHex }}
             />
-            <h3 className={`font-semibold text-sm flex items-center gap-1.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              <Sliders className="w-3.5 h-3.5 text-indigo-500" />
-              16,777,216 全色彩圖譜選擇器
+            <h3 className={`font-semibold text-sm ${textHeading}`}>
+              路線色彩選擇器
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className={`p-1 rounded-lg transition-colors ${
+            className={`p-1 rounded-md transition-colors cursor-pointer ${
               isLight
-                ? 'text-slate-400 hover:text-slate-800 hover:bg-slate-100'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
             title="關閉 (Esc)"
           >
@@ -205,35 +194,27 @@ export const ColorModal: React.FC<ColorModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4">
-          {/* 1. 2D Spectrum Area (Saturation x Value) */}
-          <div className="space-y-2">
+        <div className="p-5 space-y-4">
+          {/* 1. 2D Spectrum Area */}
+          <div className="space-y-3">
             <div
               ref={spectrumRef}
               onPointerDown={handleSpectrumPointerDown}
-              className="relative w-full h-36 rounded-xl overflow-hidden cursor-crosshair shadow-inner"
+              className={`relative w-full h-36 rounded-lg overflow-hidden cursor-crosshair border ${borderCol}`}
               style={{
                 backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
               }}
             >
-              {/* White horizontal gradient (Saturation) */}
               <div
                 className="absolute inset-0"
-                style={{
-                  background: 'linear-gradient(to right, #ffffff, transparent)',
-                }}
+                style={{ background: 'linear-gradient(to right, #ffffff, transparent)' }}
               />
-              {/* Black vertical gradient (Value / Brightness) */}
               <div
                 className="absolute inset-0"
-                style={{
-                  background: 'linear-gradient(to top, #000000, transparent)',
-                }}
+                style={{ background: 'linear-gradient(to top, #000000, transparent)' }}
               />
-
-              {/* Spectrum Draggable Handle */}
               <div
-                className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white shadow-md pointer-events-none transition-transform"
+                className="absolute w-3.5 h-3.5 -ml-[7px] -mt-[7px] rounded-full border-2 border-white shadow pointer-events-none"
                 style={{
                   left: `${hsv.s * 100}%`,
                   top: `${(1 - hsv.v) * 100}%`,
@@ -242,20 +223,19 @@ export const ColorModal: React.FC<ColorModalProps> = ({
               />
             </div>
 
-            {/* 2. 1D Hue Rainbow Slider (0 to 360 deg) */}
+            {/* 2. Hue Slider */}
             <div
               ref={hueSliderRef}
               onPointerDown={handleHuePointerDown}
-              className="relative w-full h-3.5 rounded-full cursor-pointer shadow-inner"
+              className="relative w-full h-3 rounded-full cursor-pointer"
               style={{
                 background:
                   'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
               }}
-              title="滑動選擇色相 (Hue 0° ~ 360°)"
+              title="選擇色相 (0° ~ 360°)"
             >
-              {/* Hue Thumb */}
               <div
-                className="absolute top-1/2 -mt-2.5 -ml-2.5 w-5 h-5 rounded-full border-2 border-white shadow-md pointer-events-none"
+                className="absolute top-1/2 -mt-2 -ml-2 w-4 h-4 rounded-full border-2 border-white shadow pointer-events-none"
                 style={{
                   left: `${(hsv.h / 360) * 100}%`,
                   backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
@@ -264,15 +244,14 @@ export const ColorModal: React.FC<ColorModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Hex Input & Preview Row */}
-          <div className="flex items-center gap-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+          {/* 3. Hex Input & Apply */}
+          <div className="flex items-center gap-2.5">
             <div
-              className="w-10 h-9 rounded-lg border border-white/40 shadow-xs shrink-0"
+              className={`w-9 h-9 rounded-md border shrink-0 ${borderCol}`}
               style={{ backgroundColor: currentColorHex }}
-              title={`當前預覽色彩: ${currentColorHex}`}
             />
             <div className="flex-1 relative">
-              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500 font-mono text-xs">
+              <div className={`absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none ${textMuted}`}>
                 <Hash className="w-3.5 h-3.5" />
               </div>
               <input
@@ -281,49 +260,57 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                 onChange={handleHexInputChange}
                 maxLength={7}
                 placeholder="#E11D48"
-                className={`w-full pl-7 pr-3 py-1.5 bg-slate-900 rounded-lg font-mono text-xs font-bold text-white uppercase border focus:outline-none transition-colors ${
+                className={`w-full h-9 pl-7 pr-3 rounded-md font-mono text-xs font-semibold uppercase border focus:outline-none transition-colors ${
+                  isLight
+                    ? 'bg-zinc-50 text-zinc-900 focus:bg-white'
+                    : 'bg-zinc-950 text-zinc-100'
+                } ${
                   inputError
-                    ? 'border-rose-500 focus:border-rose-400'
-                    : 'border-slate-800 focus:border-indigo-500'
+                    ? 'border-rose-500'
+                    : isLight
+                    ? 'border-zinc-200 focus:border-zinc-900'
+                    : 'border-zinc-800 focus:border-zinc-400'
                 }`}
               />
             </div>
             <button
+              type="button"
               onClick={() => handleApplyColor()}
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-xs font-semibold shrink-0 transition-all shadow-sm"
+              className={`h-9 px-4 rounded-md text-xs font-semibold shrink-0 transition-colors cursor-pointer ${
+                isLight
+                  ? 'bg-zinc-900 hover:bg-zinc-800 text-white'
+                  : 'bg-zinc-100 hover:bg-white text-zinc-900'
+              }`}
             >
               套用
             </button>
           </div>
 
-          {/* 4. Recent 20 Colors Section */}
-          <div className="space-y-2 pt-1 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5 text-indigo-400" />
-                前 20 個使用的顏色
-              </span>
-              <span className="text-[10px] font-mono text-slate-500">
-                {recentColors.length > 0 ? `已記錄 ${recentColors.length} / 20 色` : '尚未有歷史色彩'}
+          {/* 4. Recent 20 Colors */}
+          <div className={`space-y-2 pt-3 border-t ${borderCol}`}>
+            <div className="flex items-center justify-between text-xs">
+              <span className={`font-medium ${textHeading}`}>最近使用色</span>
+              <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
+                {recentColors.length} / 20
               </span>
             </div>
 
-            {/* 20 slots grid (10 cols x 2 rows or 5 cols x 4 rows) */}
-            <div className="grid grid-cols-10 gap-1.5 p-2 bg-slate-950/80 rounded-xl border border-slate-800/80">
+            <div className="grid grid-cols-10 gap-1.5">
               {Array.from({ length: 20 }).map((_, index) => {
                 const color = recentColors[index];
                 const isCurrent = color && currentColorHex.toUpperCase() === color.toUpperCase();
 
                 if (!color) {
-                  // Empty slot before color has been used
                   return (
                     <div
                       key={`empty-${index}`}
-                      className="h-6 rounded-md border border-dashed border-slate-800/80 bg-slate-900/30 flex items-center justify-center text-[9px] text-slate-700 font-mono"
-                      title={`第 ${index + 1} 個使用色 (尚無記錄)`}
-                    >
-                      {index + 1}
-                    </div>
+                      className={`h-6 rounded border border-dashed flex items-center justify-center text-[9px] font-mono ${
+                        isLight
+                          ? 'border-zinc-200 text-zinc-300'
+                          : 'border-zinc-800 text-zinc-700'
+                      }`}
+                      title={`欄位 ${index + 1}`}
+                    />
                   );
                 }
 
@@ -337,44 +324,24 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                       setInputError(false);
                       onSelectColor(color);
                     }}
-                    className={`h-6 rounded-md transition-all hover:scale-115 active:scale-95 focus:outline-none relative flex items-center justify-center border ${
+                    className={`h-6 rounded transition-transform hover:scale-110 focus:outline-none relative flex items-center justify-center border cursor-pointer ${
                       isCurrent
-                        ? 'ring-2 ring-white border-white scale-105 shadow-sm z-10'
-                        : 'border-black/40 hover:border-white/50'
+                        ? isLight
+                          ? 'ring-2 ring-zinc-900 border-white scale-105 z-10'
+                          : 'ring-2 ring-zinc-100 border-zinc-900 scale-105 z-10'
+                        : isLight
+                        ? 'border-black/15'
+                        : 'border-white/15'
                     }`}
                     style={{ backgroundColor: color }}
-                    title={`第 ${index + 1} 個使用色: ${color}`}
+                    title={color}
                   >
                     {isCurrent && <Check className="w-3 h-3 text-white drop-shadow" />}
                   </button>
                 );
               })}
             </div>
-            {recentColors.length === 0 && (
-              <p className="text-[10px] text-slate-500 text-center italic">
-                在還沒有使用新顏色時無歷史記錄；套用新色彩後將自動記錄於此（上限 20 色）
-              </p>
-            )}
           </div>
-        </div>
-
-        {/* Footer */}
-        <div
-          className={`px-5 py-2.5 border-t flex items-center justify-between text-[11px] transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200 text-slate-600'
-              : 'bg-slate-950/60 border-slate-800/60 text-slate-400'
-          }`}
-        >
-          <span>拖曳色盤或滑桿即可無級選擇 16,777,216 色</span>
-          <button
-            onClick={onClose}
-            className={`font-medium ${
-              isLight ? 'text-slate-700 hover:text-slate-950' : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            完成
-          </button>
         </div>
       </div>
     </div>

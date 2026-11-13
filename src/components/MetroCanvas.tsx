@@ -8,7 +8,14 @@ import {
   Point, 
   EffectiveTheme,
   LabelPosition,
-  LABEL_POSITION_PRESETS
+  LABEL_POSITION_PRESETS,
+  MIN_Z_ORDER,
+  MAX_Z_ORDER,
+  clampZOrder,
+  clampLineOffset,
+  normalizeSvgScale,
+  normalizeSvgAngle,
+  normalizeStrokeWidth
 } from '../types/metro';
 import { 
   snapToGrid, 
@@ -23,7 +30,13 @@ import {
   Maximize2, 
   Crosshair, 
   Compass,
-  X
+  X,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  Layers,
+  RotateCcw
 } from 'lucide-react';
 
 export interface AlignmentGuide {
@@ -67,6 +80,7 @@ interface MetroCanvasProps {
   onAddStation: (station: Station) => void;
   onUpdateStationPos: (id: string, x: number, y: number) => void;
   onUpdateStationsPos?: (updates: { id: string; x: number; y: number }[]) => void;
+  onBatchUpdateStations?: (updates: Array<{ id: string } & Partial<Station>>) => void;
   onBatchDeleteStations?: (ids: string[]) => void;
   onUpdateStation?: (updated: Station) => void;
   onAddConnection: (
@@ -77,6 +91,11 @@ interface MetroCanvasProps {
     waypoints?: Point[]
   ) => void;
   onUpdateConnectionWaypoints: (connId: string, waypoints: Point[]) => void;
+  onUpdateStationZIndex?: (stationId: string, zIndex: number) => void;
+  onBatchUpdateStationsZIndex?: (stationIds: string[], delta: number) => void;
+  onUpdateConnectionZIndex?: (connId: string, zIndex: number) => void;
+  onUpdateConnectionOffset?: (connId: string, offset: number) => void;
+  onUpdateConnectionStyle?: (connId: string, patch: Partial<Connection>) => void;
   onDeleteSelected: () => void;
   onRecordHistory?: () => void;
   theme?: EffectiveTheme;
@@ -104,10 +123,16 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   onAddStation,
   onUpdateStationPos,
   onUpdateStationsPos,
+  onBatchUpdateStations,
   onBatchDeleteStations,
   onUpdateStation,
   onAddConnection,
   onUpdateConnectionWaypoints,
+  onUpdateStationZIndex,
+  onBatchUpdateStationsZIndex,
+  onUpdateConnectionZIndex,
+  onUpdateConnectionOffset,
+  onUpdateConnectionStyle,
   onDeleteSelected,
   onRecordHistory,
   theme = 'dark',
@@ -189,6 +214,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   // Connection source state
   const [connectSourceStationId, setConnectSourceStationId] = useState<string | null>(null);
+  const justCompletedConnectRef = useRef(false);
   const [mouseCanvasPos, setMouseCanvasPos] = useState<{ x: number; y: number } | null>(null);
 
   // Freehand mouse trajectory recording points while connecting in free_curve mode
@@ -208,6 +234,37 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     connId: string;
     index: number;
   } | null>(null);
+
+  // Stage 3: Single Station & Multi-Station Group SVG Free Transform states
+  type TransformHandleKind = 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w' | 'rotate';
+  const stationTransformRef = useRef<{
+    stationId: string;
+    handle: TransformHandleKind;
+    centerX: number;
+    centerY: number;
+    baseHalf: number;
+    startDist: number;
+    startAngle: number;
+    origScale: number;
+    origScaleX: number;
+    origScaleY: number;
+    origRotation: number;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  const groupTransformRef = useRef<{
+    handle: TransformHandleKind;
+    cx: number;
+    cy: number;
+    halfW: number;
+    halfH: number;
+    startAngle: number;
+    startDist: number;
+    initialStations: Array<{ id: string; x: number; y: number; scale: number }>;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  const [transformHudText, setTransformHudText] = useState<string | null>(null);
 
   // Multi-touch tracking for pinch-to-zoom & two-finger pan on mobile/tablet
   const touchPointsRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
@@ -313,6 +370,33 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         onSetToolMode('add_virtual_node');
       } else if (e.key === 'c' || e.key === 'C') {
         onSetToolMode('connect');
+      } else if (e.key === '[' || e.key === '{' || e.key === ']' || e.key === '}') {
+        const isUp = e.key === ']' || e.key === '}';
+        const toExtreme = e.shiftKey || e.key === '{' || e.key === '}';
+        if (selectedConnectionId && onUpdateConnectionZIndex) {
+          const conn = connections.find((c) => c.id === selectedConnectionId);
+          if (conn) {
+            e.preventDefault();
+            const cur = conn.zIndex ?? 0;
+            const next = toExtreme
+              ? (isUp ? MAX_Z_ORDER : MIN_Z_ORDER)
+              : clampZOrder(cur + (isUp ? 1 : -1));
+            onUpdateConnectionZIndex(conn.id, next);
+          }
+        } else if (currentSelectedStationIds.length > 1 && onBatchUpdateStationsZIndex) {
+          e.preventDefault();
+          onBatchUpdateStationsZIndex(currentSelectedStationIds, isUp ? 1 : -1);
+        } else if (selectedStationId && onUpdateStationZIndex) {
+          const st = stations.find((s) => s.id === selectedStationId);
+          if (st) {
+            e.preventDefault();
+            const cur = st.zIndex ?? 0;
+            const next = toExtreme
+              ? (isUp ? MAX_Z_ORDER : MIN_Z_ORDER)
+              : clampZOrder(cur + (isUp ? 1 : -1));
+            onUpdateStationZIndex(st.id, next);
+          }
+        }
       }
     };
 
@@ -320,7 +404,21 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onDeleteSelected, onSelectStation, onSelectStationIds, onSelectConnection, onSetToolMode]);
+  }, [
+    onDeleteSelected,
+    onSelectStation,
+    onSelectStationIds,
+    onSelectConnection,
+    onSetToolMode,
+    selectedConnectionId,
+    selectedStationId,
+    currentSelectedStationIds,
+    connections,
+    stations,
+    onUpdateConnectionZIndex,
+    onUpdateStationZIndex,
+    onBatchUpdateStationsZIndex,
+  ]);
 
   // Batch alignment tools for selected stations
   const handleBatchAlignY = () => {
@@ -501,6 +599,145 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           }
           return;
         }
+      }
+
+      // Stage 3: Single Station Free SVG Transform Drag
+      if (stationTransformRef.current) {
+        const info = stationTransformRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const dx = curWorld.rawX - info.centerX;
+        const dy = curWorld.rawY - info.centerY;
+
+        if (!info.hasRecordedHistory) {
+          info.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        const st = stations.find((s) => s.id === info.stationId);
+        if (st && onUpdateStation) {
+          if (info.handle === 'rotate') {
+            const curAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+            let nextRot = info.origRotation + (curAngle - info.startAngle);
+            if (e.shiftKey) {
+              nextRot = Math.round(nextRot / 15) * 15;
+            }
+            const normalizedRot = normalizeSvgAngle(nextRot);
+            onUpdateStation({ ...st, rotation: normalizedRot });
+            setTransformHudText(`旋轉 ${normalizedRot}°`);
+          } else {
+            const rad = -(info.origRotation * Math.PI) / 180;
+            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+            if (info.handle === 'e' || info.handle === 'w') {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(4, info.baseHalf * info.origScale),
+                0.15
+              );
+              onUpdateStation({ ...st, scaleX: nextScaleX });
+              setTransformHudText(`水平比例 ${nextScaleX}×`);
+            } else if (info.handle === 'n' || info.handle === 's') {
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(4, info.baseHalf * info.origScale),
+                0.15
+              );
+              onUpdateStation({ ...st, scaleY: nextScaleY });
+              setTransformHudText(`垂直比例 ${nextScaleY}×`);
+            } else if (e.shiftKey) {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(4, info.baseHalf * info.origScale),
+                0.15
+              );
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(4, info.baseHalf * info.origScale),
+                0.15
+              );
+              onUpdateStation({ ...st, scaleX: nextScaleX, scaleY: nextScaleY });
+              setTransformHudText(`${nextScaleX}× · ${nextScaleY}×`);
+            } else {
+              const curDist = Math.max(4, Math.hypot(dx, dy));
+              const nextScale = normalizeSvgScale(
+                info.origScale * (curDist / Math.max(4, info.startDist)),
+                0.15
+              );
+              onUpdateStation({ ...st, scale: nextScale });
+              setTransformHudText(`縮放 ${nextScale}×`);
+            }
+          }
+        }
+        return;
+      }
+
+      // Stage 3: Multi-Station Group Free SVG Transform Drag
+      if (groupTransformRef.current) {
+        const info = groupTransformRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const dx = curWorld.rawX - info.cx;
+        const dy = curWorld.rawY - info.cy;
+
+        if (!info.hasRecordedHistory) {
+          info.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        if (info.handle === 'rotate') {
+          const curAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          let deltaDeg = curAngle - info.startAngle;
+          if (e.shiftKey) {
+            deltaDeg = Math.round(deltaDeg / 15) * 15;
+          }
+          const rad = (deltaDeg * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          const updates = info.initialStations.map((s) => ({
+            id: s.id,
+            x: Math.round(info.cx + (s.x - info.cx) * cos - (s.y - info.cy) * sin),
+            y: Math.round(info.cy + (s.x - info.cx) * sin + (s.y - info.cy) * cos),
+          }));
+          if (onBatchUpdateStations) {
+            onBatchUpdateStations(updates);
+          } else {
+            onUpdateStationsPos?.(updates);
+          }
+          setTransformHudText(`群組旋轉 ${Math.round(deltaDeg)}°`);
+        } else {
+          let ratioX = 1;
+          let ratioY = 1;
+          let uniformRatio = 1;
+
+          if (info.handle === 'e' || info.handle === 'w') {
+            ratioX = Math.max(0.1, Math.abs(dx) / Math.max(8, info.halfW));
+            setTransformHudText(`群組水平 ${ratioX.toFixed(2)}×`);
+          } else if (info.handle === 'n' || info.handle === 's') {
+            ratioY = Math.max(0.1, Math.abs(dy) / Math.max(8, info.halfH));
+            setTransformHudText(`群組垂直 ${ratioY.toFixed(2)}×`);
+          } else if (e.shiftKey) {
+            ratioX = Math.max(0.1, Math.abs(dx) / Math.max(8, info.halfW));
+            ratioY = Math.max(0.1, Math.abs(dy) / Math.max(8, info.halfH));
+            setTransformHudText(`群組 ${ratioX.toFixed(2)}× · ${ratioY.toFixed(2)}×`);
+          } else {
+            const curDist = Math.max(8, Math.hypot(dx, dy));
+            uniformRatio = Math.max(0.1, curDist / Math.max(8, info.startDist));
+            ratioX = uniformRatio;
+            ratioY = uniformRatio;
+            setTransformHudText(`群組縮放 ${uniformRatio.toFixed(2)}×`);
+          }
+
+          const updates = info.initialStations.map((s) => ({
+            id: s.id,
+            x: Math.round(info.cx + (s.x - info.cx) * ratioX),
+            y: Math.round(info.cy + (s.y - info.cy) * ratioY),
+            ...(e.altKey && uniformRatio !== 1 && info.handle !== 'e' && info.handle !== 'w' && info.handle !== 'n' && info.handle !== 's'
+              ? { scale: normalizeSvgScale(s.scale * uniformRatio, 0.15) }
+              : {}),
+          }));
+          if (onBatchUpdateStations) {
+            onBatchUpdateStations(updates);
+          } else {
+            onUpdateStationsPos?.(updates);
+          }
+        }
+        return;
       }
 
       // 框選多個站點 (Marquee box selection drag)
@@ -708,7 +945,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   targetPos: { x: finalTargetX, y: finalTargetY },
                   targetStation: nearbyOtherStation,
                   distance: targetDist,
-                  label: `等距: ${Math.round(targetDist)}px`,
+                  label: `等距: ${Math.round(targetDist)}`,
                 };
 
                 activeEqualDistanceGuideRef.current = guide;
@@ -1000,7 +1237,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   targetPos: { x: finalX, y: finalY },
                   targetStation: stations.find((s) => s.id === stationId),
                   distance: refDist,
-                  label: `等距: ${Math.round(refDist)}px`,
+                  label: `等距: ${Math.round(refDist)}`,
                 };
                 break;
               }
@@ -1092,6 +1329,18 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             onSelectStation(null);
           }
         }
+        return;
+      }
+
+      // Release Stage 3 free transforms
+      if (stationTransformRef.current) {
+        stationTransformRef.current = null;
+        setTransformHudText(null);
+        return;
+      }
+      if (groupTransformRef.current) {
+        groupTransformRef.current = null;
+        setTransformHudText(null);
         return;
       }
 
@@ -1241,6 +1490,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       setActiveAlignmentGuides([]);
       activeEqualDistanceGuideRef.current = null;
       setActiveEqualDistanceGuide(null);
+      stationTransformRef.current = null;
+      groupTransformRef.current = null;
+      setTransformHudText(null);
       marqueeRef.current = null;
       setMarqueeBox(null);
       canvasPointerDownRef.current = null;
@@ -1266,6 +1518,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     screenToWorld, 
     onUpdateStationPos, 
     onUpdateStationsPos,
+    onBatchUpdateStations,
     onAddStation, 
     onSelectStation, 
     onSelectStationIds,
@@ -1283,6 +1536,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     connections,
     stations,
     onUpdateStation,
+    onRecordHistory,
     viewTransform.scale
   ]);
 
@@ -1337,9 +1591,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       return;
     }
 
-    // In 'select' or 'marquee_select' mode with left click:
-    // Initiate marquee box selection on canvas background
-    if ((toolMode === 'select' || toolMode === 'marquee_select') && e.button === 0) {
+    // Only initiate marquee box selection in 'marquee_select' mode (select mode pans on empty canvas drag)
+    if (toolMode === 'marquee_select' && e.button === 0) {
       const worldPos = screenToWorld(e.clientX, e.clientY, false);
       const isAdditive = e.shiftKey && currentSelectedStationIds.length > 0;
       marqueeRef.current = {
@@ -1471,11 +1724,13 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
     if (toolMode === 'connect') {
       if (!connectSourceStationId) {
+        justCompletedConnectRef.current = false;
         setConnectSourceStationId(station.id);
         freeDrawingPointsRef.current = [];
         setFreeDrawingPoints([]);
         onSelectStation(station.id);
       } else if (connectSourceStationId !== station.id) {
+        justCompletedConnectRef.current = true;
         completeConnection(station, e.shiftKey);
       }
       return;
@@ -1528,6 +1783,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   // Station Pointer Up: complete drag-to-connect if user dragged from source station
   const handleStationPointerUp = (e: React.PointerEvent, station: Station) => {
+    if (justCompletedConnectRef.current) {
+      justCompletedConnectRef.current = false;
+      return;
+    }
     if (
       toolMode === 'connect' &&
       connectSourceStationId &&
@@ -1608,6 +1867,44 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   const sourceStation = stations.find((s) => s.id === connectSourceStationId);
   const selectedConn = connections.find((c) => c.id === selectedConnectionId);
+  const selectedSingleStation =
+    currentSelectedStationIds.length <= 1 && selectedStationId
+      ? stations.find((s) => s.id === selectedStationId) || null
+      : null;
+
+  // Sort SVG connections and stations by zIndex (-10 ~ 10, default 0) so higher zIndex renders on top
+  const sortedConnections = React.useMemo(
+    () => [...connections].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)),
+    [connections]
+  );
+
+  const sortedStations = React.useMemo(
+    () => [...stations].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)),
+    [stations]
+  );
+
+  const hasActiveNetworkPath = Boolean(
+    showShortestPathPreview &&
+      shortestPathResult &&
+      shortestPathResult.isReachable &&
+      shortestPathResult.connectionIds.length > 0
+  );
+
+  const highlightedConnectionIdSet = React.useMemo(
+    () =>
+      new Set<string>(
+        showShortestPathPreview && shortestPathResult ? shortestPathResult.connectionIds : []
+      ),
+    [showShortestPathPreview, shortestPathResult]
+  );
+
+  const highlightedStationIdSet = React.useMemo(
+    () =>
+      new Set<string>(
+        showShortestPathPreview && shortestPathResult ? shortestPathResult.stationIds : []
+      ),
+    [showShortestPathPreview, shortestPathResult]
+  );
 
   // Dynamic cursor
   const getCursorClass = () => {
@@ -1626,77 +1923,49 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     <div
       ref={containerRef}
       className={`relative flex-1 h-full overflow-hidden select-none transition-colors touch-none ${
-        isLight ? 'bg-[#F8FAFC]' : 'bg-slate-950'
+        isLight ? 'bg-[#FAFAFA]' : 'bg-[#09090B]'
       } ${getCursorClass()}`}
       style={{ touchAction: 'none' }}
       onWheel={handleWheel}
       onPointerDown={handleCanvasPointerDown}
     >
-      {/* Top Floating Status (Responsive for Mobile / Tablet) */}
+      {/* Top-Left Minimal Status Readout */}
       <div
-        className={`absolute top-2 left-2 sm:top-3 sm:left-3 z-10 flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-mono rounded-lg px-2.5 py-1 sm:px-3 sm:py-1.5 shadow-md backdrop-blur border pointer-events-none transition-colors ${
+        className={`absolute top-3 left-3 z-10 flex items-center gap-2 text-[11px] font-mono tabular-nums rounded-md px-2.5 py-1 border pointer-events-none transition-colors ${
           isLight
-            ? 'bg-white/95 border-slate-200 text-slate-700 shadow-slate-200/50'
-            : 'bg-slate-900/90 border-slate-800 text-slate-300'
+            ? 'bg-white/90 border-zinc-200 text-zinc-600'
+            : 'bg-[#111113]/90 border-zinc-800 text-zinc-400'
         }`}
       >
-        <span className="flex items-center gap-1 text-indigo-500 font-semibold">
-          <Compass className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">無限畫布</span>
-        </span>
-        <span className={isLight ? 'text-slate-300' : 'text-slate-600'}>·</span>
         <span>{Math.round(viewTransform.scale * 100)}%</span>
-        <span className={`hidden sm:inline ${isLight ? 'text-slate-300' : 'text-slate-600'}`}>·</span>
+        <span className="opacity-40">·</span>
         <span className="hidden sm:inline">
           {mouseCanvasPos ? `(${mouseCanvasPos.x}, ${mouseCanvasPos.y})` : '(0, 0)'}
         </span>
-        <span className={isLight ? 'text-slate-300' : 'text-slate-600'}>·</span>
-        {!gridSnap ? (
-          <span className="flex items-center gap-1 text-sky-500 font-sans font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
-            <span>平滑</span>
-            <span
-              className={`px-1 py-0.2 rounded text-[9px] font-mono border transition-all hidden sm:inline ${
-                isCtrlDown || nodeAlign
-                  ? 'bg-sky-500 text-white border-sky-400 font-bold'
-                  : isLight
-                  ? 'bg-sky-50 border-sky-200 text-sky-800'
-                  : 'bg-sky-950/80 border-sky-800 text-sky-300'
-              }`}
-            >
-              {isCtrlDown || nodeAlign ? '八方對齊中' : 'Ctrl 對齊'}
-            </span>
-          </span>
-        ) : (
-          <span className="text-indigo-500 font-sans font-medium">
-            吸附 ({gridSize})
-          </span>
-        )}
-        <span className={`hidden lg:inline ${isLight ? 'text-slate-300' : 'text-slate-600'}`}>·</span>
-        <span className={`hidden lg:inline ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-          {toolMode === 'add_station' && '點擊畫布放置車站 · 雙指滑動縮放'}
-          {toolMode === 'connect' &&
-            (connectSourceStationId
-              ? '點選目標車站完成連線（Esc 取消）'
-              : '點選起點車站以開始連線')}
-          {toolMode === 'select' && '滑動移動畫布 · 拖曳車站移動 · 雙指縮放視角'}
+        <span className="hidden sm:inline opacity-40">·</span>
+        <span className="font-sans">
+          {!gridSnap
+            ? isCtrlDown || nodeAlign
+              ? '對齊中'
+              : '平滑'
+            : `吸附 ${gridSize}`}
         </span>
       </div>
 
       {/* Floating Canvas Navigation HUD (Bottom-Right) */}
       <div
-        className={`absolute bottom-4 right-4 z-10 flex flex-col items-center gap-1.5 p-1 rounded-xl shadow-lg backdrop-blur border transition-colors ${
+        className={`absolute bottom-4 right-4 z-10 flex flex-col items-center p-1 gap-0.5 rounded-lg border transition-colors ${
           isLight
-            ? 'bg-white/95 border-slate-200 shadow-slate-200/60'
-            : 'bg-slate-900/90 border-slate-800'
+            ? 'bg-white/95 border-zinc-200'
+            : 'bg-[#111113]/95 border-zinc-800'
         }`}
       >
         <button
           onClick={() => handleZoom('in')}
-          className={`p-2 rounded-lg transition-colors cursor-pointer ${
+          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
             isLight
-              ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-100'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
           title="放大視角 (+)"
         >
@@ -1704,22 +1973,22 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         </button>
         <button
           onClick={() => handleZoom('out')}
-          className={`p-2 rounded-lg transition-colors cursor-pointer ${
+          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
             isLight
-              ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-100'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
           title="縮小視角 (-)"
         >
           <Minus className="w-4 h-4" />
         </button>
-        <div className={`w-full h-px my-0.5 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+        <div className={`w-5 h-px my-0.5 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
         <button
           onClick={handleFitView}
-          className={`p-2 rounded-lg transition-colors cursor-pointer ${
+          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
             isLight
-              ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-100'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
           title="聚焦完整路網 (Fit View)"
         >
@@ -1727,10 +1996,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         </button>
         <button
           onClick={handleResetToOrigin}
-          className={`p-2 rounded-lg transition-colors cursor-pointer ${
+          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
             isLight
-              ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-100'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
           title="回到坐標原點 (0, 0)"
         >
@@ -1756,9 +2025,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             <circle
               cx={gridSize / 2}
               cy={gridSize / 2}
-              r={1.1 / Math.max(viewTransform.scale, 0.4)}
-              fill={isLight ? '#94A3B8' : '#475569'}
-              fillOpacity={isLight ? 0.6 : 0.45}
+              r={1.0 / Math.max(viewTransform.scale, 0.4)}
+              fill={isLight ? '#D4D4D8' : '#3F3F46'}
+              fillOpacity={isLight ? 0.65 : 0.4}
             />
           </pattern>
 
@@ -1772,9 +2041,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             <path
               d={`M ${gridSize * 10} 0 L 0 0 0 ${gridSize * 10}`}
               fill="none"
-              stroke={isLight ? '#CBD5E1' : '#334155'}
+              stroke={isLight ? '#E4E4E7' : '#27272A'}
               strokeWidth={0.7 / Math.max(viewTransform.scale, 0.4)}
-              strokeOpacity={isLight ? 0.65 : 0.25}
+              strokeOpacity={isLight ? 0.7 : 0.35}
             />
           </pattern>
         </defs>
@@ -1794,25 +2063,44 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             </text>
           </g>
 
-          {/* Render Connections with waypoints and diamond 90° corner */}
-          {connections.map((conn) => {
+          {/* Render Connections sorted by SVG zIndex (-10 ~ 10) */}
+          {sortedConnections.map((conn) => {
             const fromSt = stations.find((s) => s.id === conn.fromStationId);
             const toSt = stations.find((s) => s.id === conn.toStationId);
             if (!fromSt || !toSt) return null;
 
             const lineColor = conn.color || activeColor;
             const isSelected = selectedConnectionId === conn.id;
+            const isPathHighlighted = hasActiveNetworkPath && highlightedConnectionIdSet.has(conn.id);
+            const lineWidth = normalizeStrokeWidth(conn.strokeWidth ?? 6);
+            const cornerR = conn.cornerRadius ?? 14;
+            const lineCap = conn.lineCap ?? 'round';
+            const baseOpacity = conn.opacity ?? 1;
+            const lineOpacity = hasActiveNetworkPath
+              ? isPathHighlighted
+                ? Math.max(0.95, baseOpacity)
+                : baseOpacity * 0.22
+              : baseOpacity;
+            const strokeStyle = conn.strokeStyle ?? 'solid';
+            const strokeDasharray =
+              strokeStyle === 'dashed'
+                ? `${Math.max(6, lineWidth * 2)} ${Math.max(4, lineWidth * 1.3)}`
+                : strokeStyle === 'dotted'
+                ? `0.1 ${Math.max(6, lineWidth * 1.8)}`
+                : undefined;
+
             const pathData = getMetroPath(
               fromSt.x,
               fromSt.y,
               toSt.x,
               toSt.y,
               conn.routeType || '135_bend',
-              14,
+              cornerR,
               conn.waypoints,
               conn.isFlipped,
               conn.angleA,
-              conn.angleB
+              conn.angleB,
+              conn.offset ?? 0
             );
 
             return (
@@ -1831,18 +2119,31 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   d={pathData}
                   fill="none"
                   stroke="transparent"
-                  strokeWidth={22}
+                  strokeWidth={Math.max(22, lineWidth + 16)}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
+                {/* Pathfinding highlight aura under shortest-path connections */}
+                {isPathHighlighted && (
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke="#FACC15"
+                    strokeWidth={lineWidth + 10}
+                    strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
+                    strokeLinejoin="round"
+                    opacity={0.45}
+                    className="export-ignore"
+                  />
+                )}
                 {/* Highlight outline when selected */}
                 {isSelected && (
                   <path
                     d={pathData}
                     fill="none"
                     stroke={isLight ? '#0F172A' : '#ffffff'}
-                    strokeWidth={12}
-                    strokeLinecap="round"
+                    strokeWidth={lineWidth + 6}
+                    strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
                     strokeLinejoin="round"
                     opacity={isLight ? 0.25 : 0.8}
                   />
@@ -1852,15 +2153,30 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   d={pathData}
                   fill="none"
                   stroke={lineColor}
-                  strokeWidth={6}
-                  strokeLinecap="round"
+                  strokeWidth={lineWidth}
+                  strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
                   strokeLinejoin="round"
+                  strokeDasharray={strokeDasharray}
+                  opacity={lineOpacity}
                 />
+                {/* Inner cutout for double-track style */}
+                {strokeStyle === 'double' && (
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke={isLight ? '#F8FAFC' : '#020617'}
+                    strokeWidth={Math.max(1.5, lineWidth * 0.36)}
+                    strokeLinecap={lineCap}
+                    strokeLinejoin="round"
+                    opacity={lineOpacity}
+                    pointerEvents="none"
+                  />
+                )}
               </g>
             );
           })}
 
-          {/* Shortest Path Preview Animated Dashed Line Layer */}
+          {/* Shortest Path Preview Animated Highlight Layer */}
           {showShortestPathPreview && shortestPathResult && shortestPathResult.stationIds.length >= 2 && (
             <g className="pointer-events-none shortest-path-preview-layer export-ignore">
               {shortestPathResult.stationIds.slice(0, -1).map((fromId, idx) => {
@@ -1871,20 +2187,24 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
                 const connId = shortestPathResult.connectionIds[idx];
                 const conn = connId ? connections.find((c) => c.id === connId) : undefined;
+                const segWidth = conn ? normalizeStrokeWidth(conn.strokeWidth ?? 6) : 6;
 
                 let pathD = '';
                 if (conn) {
+                  const connFrom = stations.find((s) => s.id === conn.fromStationId) || st1;
+                  const connTo = stations.find((s) => s.id === conn.toStationId) || st2;
                   pathD = getMetroPath(
-                    st1.x,
-                    st1.y,
-                    st2.x,
-                    st2.y,
+                    connFrom.x,
+                    connFrom.y,
+                    connTo.x,
+                    connTo.y,
                     conn.routeType || '135_bend',
-                    14,
+                    conn.cornerRadius ?? 14,
                     conn.waypoints,
                     conn.isFlipped,
                     conn.angleA,
-                    conn.angleB
+                    conn.angleB,
+                    conn.offset ?? 0
                   );
                 } else {
                   pathD = getMetroPath(st1.x, st1.y, st2.x, st2.y, activeRouteType || '135_bend', 14);
@@ -1896,8 +2216,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     <path
                       d={pathD}
                       fill="none"
-                      stroke="#06B6D4"
-                      strokeWidth={14}
+                      stroke={conn ? '#FACC15' : '#06B6D4'}
+                      strokeWidth={Math.max(14, segWidth + 8)}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       opacity={0.35}
@@ -1907,17 +2227,17 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       d={pathD}
                       fill="none"
                       stroke="#38BDF8"
-                      strokeWidth={8}
+                      strokeWidth={Math.max(8, segWidth + 2)}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      opacity={0.65}
+                      opacity={0.7}
                     />
                     {/* Inner high-contrast animated dashed line with marching ants */}
                     <path
                       d={pathD}
                       fill="none"
                       stroke="#FFFFFF"
-                      strokeWidth={3.5}
+                      strokeWidth={Math.max(3, Math.min(8, segWidth * 0.55))}
                       strokeDasharray="9 7"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -2317,8 +2637,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             );
           })}
 
-          {/* Render Stations */}
-          {stations.map((st) => {
+          {/* Render Stations sorted by SVG zIndex (-10 ~ 10) */}
+          {sortedStations.map((st) => {
             const isSelected = selectedStationId === st.id;
             const isConnectSource = connectSourceStationId === st.id;
             const isDraggingThis = draggingStationId === st.id;
@@ -2351,6 +2671,21 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               }
             }
 
+            const stScale = st.scale ?? 1;
+            const sx = stScale * (st.scaleX ?? 1);
+            const sy = stScale * (st.scaleY ?? 1);
+            const stRot = st.rotation ?? 0;
+            const baseStOpacity = st.opacity ?? 1;
+            const isStationOnPath = hasActiveNetworkPath && highlightedStationIdSet.has(st.id);
+            const stOpacity = hasActiveNetworkPath
+              ? isStationOnPath
+                ? Math.max(0.95, baseStOpacity)
+                : baseStOpacity * 0.42
+              : baseStOpacity;
+            const maxScale = Math.max(sx, sy);
+            const lblScale = st.labelScale ?? 1;
+            const lblRot = st.labelRotation ?? 0;
+
             return (
               <g
                 key={st.id}
@@ -2359,13 +2694,13 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 onPointerDown={(e) => handleStationPointerDown(e, st)}
                 onPointerUp={(e) => handleStationPointerUp(e, st)}
               >
-                {/* Generous transparent hit area so all stations can be clicked and dragged effortlessly on mobile / desktop */}
-                <circle r={26} fill="transparent" className="cursor-pointer" />
+                {/* Generous transparent hit area scaled proportionally to marker size */}
+                <circle r={Math.max(26, 20 * maxScale)} fill="transparent" className="cursor-pointer" />
 
                 {/* Multi-selection outer glowing indicator */}
                 {currentSelectedStationIds.includes(st.id) && (
                   <circle
-                    r={st.isVirtual ? 16 : 21}
+                    r={(st.isVirtual ? 16 : 21) * maxScale}
                     fill="rgba(99, 102, 241, 0.18)"
                     stroke="#6366F1"
                     strokeWidth={2}
@@ -2377,7 +2712,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
                 {(isSelected || isConnectSource) && !currentSelectedStationIds.includes(st.id) && (
                   <circle
-                    r={18}
+                    r={18 * maxScale}
                     fill="none"
                     stroke={isConnectSource ? activeColor : '#38BDF8'}
                     strokeWidth={2.5}
@@ -2387,249 +2722,256 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   />
                 )}
 
-                {/* Virtual Node vs Passenger Station Display */}
-                {st.isVirtual ? (
-                  <g pointerEvents="none">
-                    {/* Black circle with cross (X / 叉叉) in center */}
-                    <circle
-                      r={8}
-                      fill="#000000"
-                      stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                      strokeWidth={1.8}
-                    />
-                    <line
-                      x1={-3.5}
-                      y1={-3.5}
-                      x2={3.5}
-                      y2={3.5}
-                      stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                      strokeWidth={1.8}
-                      strokeLinecap="round"
-                    />
-                    <line
-                      x1={3.5}
-                      y1={-3.5}
-                      x2={-3.5}
-                      y2={3.5}
-                      stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                      strokeWidth={1.8}
-                      strokeLinecap="round"
-                    />
+                {/* Stage 3 Free SVG Transform Group for Station Marker (Scale / Stretch / Rotate / Opacity) */}
+                <g
+                  transform={`rotate(${stRot}) scale(${sx}, ${sy})`}
+                  opacity={stOpacity}
+                  pointerEvents="none"
+                >
+                  {/* Virtual Node vs Passenger Station Display */}
+                  {st.isVirtual ? (
+                    <g pointerEvents="none">
+                      {/* Black circle with cross (X / 叉叉) in center */}
+                      <circle
+                        r={8}
+                        fill="#000000"
+                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                        strokeWidth={1.8}
+                      />
+                      <line
+                        x1={-3.5}
+                        y1={-3.5}
+                        x2={3.5}
+                        y2={3.5}
+                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                        strokeWidth={1.8}
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1={3.5}
+                        y1={-3.5}
+                        x2={-3.5}
+                        y2={3.5}
+                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                        strokeWidth={1.8}
+                        strokeLinecap="round"
+                      />
+                    </g>
+                  ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
+                    /* Dynamic Unlimited N-Line Interchange Station (無限制多線換乘站) */
+                    (() => {
+                      const PALETTE = [
+                        '#E11D48', '#2563EB', '#16A34A', '#EA580C', '#854D0E',
+                        '#CA8A04', '#9333EA', '#06B6D4', '#EC4899', '#10B981',
+                        '#6366F1', '#F59E0B', '#14B8A6', '#8B5CF6', '#F43F5E'
+                      ];
 
-                    {/* Faint indicator badge when selected */}
-                    {isSelected && (
-                      <g transform="translate(0, -15)">
-                        <rect
-                          x={-28}
-                          y={-8}
-                          width={56}
-                          height={16}
-                          rx={4}
-                          fill={isLight ? '#FFFFFF' : '#0F172A'}
-                          stroke="#38BDF8"
-                          strokeWidth={1}
-                          opacity={0.95}
-                        />
-                        <text
-                          textAnchor="middle"
-                          y={3.5}
-                          className={`font-sans text-[9px] font-bold select-none ${
-                            isLight ? 'fill-sky-700' : 'fill-sky-300'
-                          }`}
-                        >
-                          虛擬節點
-                        </text>
-                      </g>
-                    )}
-                  </g>
-                ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
-                  /* Dynamic Unlimited N-Line Interchange Station (無限制多線換乘站) */
-                  (() => {
-                    const PALETTE = [
-                      '#E11D48', '#2563EB', '#16A34A', '#EA580C', '#854D0E',
-                      '#CA8A04', '#9333EA', '#06B6D4', '#EC4899', '#10B981',
-                      '#6366F1', '#F59E0B', '#14B8A6', '#8B5CF6', '#F43F5E'
-                    ];
-
-                    let colors = [...distinctColors];
-                    if (colors.length === 0) {
-                      colors = [primaryColor, '#2563EB'];
-                    } else if (colors.length === 1 && (st.type === 'interchange' || st.type === 'interchange_3line')) {
-                      const fallback = PALETTE.find((c) => c.toUpperCase() !== colors[0].toUpperCase()) || '#2563EB';
-                      colors.push(fallback);
-                    }
-
-                    // If manual lines count is specified or 3-line type selected, pad or trim colors
-                    const targetCount = st.interchangeLinesCount ?? (st.type === 'interchange_3line' ? Math.max(3, colors.length) : colors.length);
-                    if (targetCount > colors.length) {
-                      for (let i = 0; colors.length < targetCount; i++) {
-                        const fallbackColor = PALETTE[i % PALETTE.length];
-                        if (!colors.includes(fallbackColor)) {
-                          colors.push(fallbackColor);
-                        } else {
-                          colors.push(PALETTE[(i + 3) % PALETTE.length]);
-                        }
+                      let colors = [...distinctColors];
+                      if (colors.length === 0) {
+                        colors = [primaryColor, '#2563EB'];
+                      } else if (colors.length === 1 && (st.type === 'interchange' || st.type === 'interchange_3line')) {
+                        const fallback = PALETTE.find((c) => c.toUpperCase() !== colors[0].toUpperCase()) || '#2563EB';
+                        colors.push(fallback);
                       }
-                    } else if (st.interchangeLinesCount && targetCount < colors.length) {
-                      colors = colors.slice(0, targetCount);
-                    }
 
-                    const N = Math.max(2, colors.length);
-                    const iStyle = st.interchangeStyle || 'dots';
+                      // If manual lines count is specified or 3-line type selected, pad or trim colors
+                      const targetCount = st.interchangeLinesCount ?? (st.type === 'interchange_3line' ? Math.max(3, colors.length) : colors.length);
+                      if (targetCount > colors.length) {
+                        for (let i = 0; colors.length < targetCount; i++) {
+                          const fallbackColor = PALETTE[i % PALETTE.length];
+                          if (!colors.includes(fallbackColor)) {
+                            colors.push(fallbackColor);
+                          } else {
+                            colors.push(PALETTE[(i + 3) % PALETTE.length]);
+                          }
+                        }
+                      } else if (st.interchangeLinesCount && targetCount < colors.length) {
+                        colors = colors.slice(0, targetCount);
+                      }
 
-                    // 1. Pie Style (扇形輪盤切分 - 支援任意 N 等分 360° 輪盤)
-                    if (iStyle === 'pie') {
-                      const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
-                      const rPie = rOuter - 4;
-                      const rHub = Math.max(2, 2.8 - N * 0.08);
+                      const N = Math.max(2, colors.length);
+                      const iStyle = st.interchangeStyle || 'dots';
+
+                      // 1. Pie Style (扇形輪盤切分 - 支援任意 N 等分 360° 輪盤)
+                      if (iStyle === 'pie') {
+                        const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
+                        const rPie = rOuter - 4;
+                        const rHub = Math.max(2, 2.8 - N * 0.08);
+
+                        return (
+                          <g pointerEvents="none">
+                            <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                            {colors.map((c, idx) => {
+                              const degStart = -90 + (idx * 360) / N;
+                              const degEnd = -90 + ((idx + 1) * 360) / N;
+                              const radStart = (degStart * Math.PI) / 180;
+                              const radEnd = (degEnd * Math.PI) / 180;
+                              const x1 = Math.round(Math.cos(radStart) * rPie * 100) / 100;
+                              const y1 = Math.round(Math.sin(radStart) * rPie * 100) / 100;
+                              const x2 = Math.round(Math.cos(radEnd) * rPie * 100) / 100;
+                              const y2 = Math.round(Math.sin(radEnd) * rPie * 100) / 100;
+                              const largeArc = 360 / N > 180 ? 1 : 0;
+                              const pathData = `M 0 0 L ${x1} ${y1} A ${rPie} ${rPie} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+                              return (
+                                <g key={idx}>
+                                  <path d={pathData} fill={c} />
+                                  <line x1={0} y1={0} x2={x1} y2={y1} stroke="#ffffff" strokeWidth={1.2} />
+                                </g>
+                              );
+                            })}
+                            <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
+                          </g>
+                        );
+                      }
+
+                      // 2. Capsule Style (連鎖延伸膠囊 - 支援任意 N 個節點橫向展開)
+                      if (iStyle === 'capsule') {
+                        const nodeSpacing = Math.max(7, Math.min(10, 36 / (N - 1 || 1)));
+                        const halfSpan = ((N - 1) * nodeSpacing) / 2;
+                        const capWidth = halfSpan * 2 + 20;
+                        const capHeight = 18;
+                        const nodeRadius = Math.max(2.8, Math.min(4, 14 / Math.sqrt(N)));
+
+                        return (
+                          <g pointerEvents="none">
+                            <rect
+                              x={-capWidth / 2}
+                              y={-capHeight / 2}
+                              width={capWidth}
+                              height={capHeight}
+                              rx={capHeight / 2}
+                              fill="#ffffff"
+                              stroke="#0f172a"
+                              strokeWidth={3.5}
+                            />
+                            <line
+                              x1={-halfSpan}
+                              y1={0}
+                              x2={halfSpan}
+                              y2={0}
+                              stroke="#0f172a"
+                              strokeWidth={2}
+                            />
+                            {colors.map((c, idx) => {
+                              const cx = -halfSpan + idx * nodeSpacing;
+                              return (
+                                <circle
+                                  key={idx}
+                                  cx={cx}
+                                  cy={0}
+                                  r={nodeRadius}
+                                  fill={c}
+                                  stroke="#ffffff"
+                                  strokeWidth={1}
+                                />
+                              );
+                            })}
+                          </g>
+                        );
+                      }
+
+                      // 3. Dots Style (色點陣列 - 2線平行、3線三角、4線以上環狀正多邊形陣列，無限制延伸)
+                      if (N === 2) {
+                        return (
+                          <g pointerEvents="none">
+                            <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                            <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
+                            <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
+                          </g>
+                        );
+                      }
+
+                      if (N === 3) {
+                        return (
+                          <g pointerEvents="none">
+                            <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                            <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
+                            <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
+                            <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
+                            <circle r={1.2} fill="#0f172a" />
+                          </g>
+                        );
+                      }
+
+                      // N >= 4: Regular N-gon Ring Layout
+                      const rHub = Math.max(14, 11 + N * 0.9);
+                      const rOrbit = rHub - 6.5;
+                      const rDot = Math.max(2.2, Math.min(3.2, 22 / N));
 
                       return (
                         <g pointerEvents="none">
-                          <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                          <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
                           {colors.map((c, idx) => {
-                            const degStart = -90 + (idx * 360) / N;
-                            const degEnd = -90 + ((idx + 1) * 360) / N;
-                            const radStart = (degStart * Math.PI) / 180;
-                            const radEnd = (degEnd * Math.PI) / 180;
-                            const x1 = Math.round(Math.cos(radStart) * rPie * 100) / 100;
-                            const y1 = Math.round(Math.sin(radStart) * rPie * 100) / 100;
-                            const x2 = Math.round(Math.cos(radEnd) * rPie * 100) / 100;
-                            const y2 = Math.round(Math.sin(radEnd) * rPie * 100) / 100;
-                            const largeArc = 360 / N > 180 ? 1 : 0;
-                            const pathData = `M 0 0 L ${x1} ${y1} A ${rPie} ${rPie} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-
-                            return (
-                              <g key={idx}>
-                                <path d={pathData} fill={c} />
-                                <line x1={0} y1={0} x2={x1} y2={y1} stroke="#ffffff" strokeWidth={1.2} />
-                              </g>
-                            );
-                          })}
-                          <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
-                        </g>
-                      );
-                    }
-
-                    // 2. Capsule Style (連鎖延伸膠囊 - 支援任意 N 個節點橫向展開)
-                    if (iStyle === 'capsule') {
-                      const nodeSpacing = Math.max(7, Math.min(10, 36 / (N - 1 || 1)));
-                      const halfSpan = ((N - 1) * nodeSpacing) / 2;
-                      const capWidth = halfSpan * 2 + 20;
-                      const capHeight = 18;
-                      const nodeRadius = Math.max(2.8, Math.min(4, 14 / Math.sqrt(N)));
-
-                      return (
-                        <g pointerEvents="none">
-                          <rect
-                            x={-capWidth / 2}
-                            y={-capHeight / 2}
-                            width={capWidth}
-                            height={capHeight}
-                            rx={capHeight / 2}
-                            fill="#ffffff"
-                            stroke="#0f172a"
-                            strokeWidth={3.5}
-                          />
-                          <line
-                            x1={-halfSpan}
-                            y1={0}
-                            x2={halfSpan}
-                            y2={0}
-                            stroke="#0f172a"
-                            strokeWidth={2}
-                          />
-                          {colors.map((c, idx) => {
-                            const cx = -halfSpan + idx * nodeSpacing;
+                            const deg = -90 + (idx * 360) / N;
+                            const rad = (deg * Math.PI) / 180;
+                            const cx = Math.round(Math.cos(rad) * rOrbit * 100) / 100;
+                            const cy = Math.round(Math.sin(rad) * rOrbit * 100) / 100;
                             return (
                               <circle
                                 key={idx}
                                 cx={cx}
-                                cy={0}
-                                r={nodeRadius}
+                                cy={cy}
+                                r={rDot}
                                 fill={c}
-                                stroke="#ffffff"
-                                strokeWidth={1}
                               />
                             );
                           })}
+                          <circle r={1.4} fill="#0f172a" />
                         </g>
                       );
-                    }
-
-                    // 3. Dots Style (色點陣列 - 2線平行、3線三角、4線以上環狀正多邊形陣列，無限制延伸)
-                    if (N === 2) {
-                      return (
-                        <g pointerEvents="none">
-                          <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                          <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
-                          <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
-                        </g>
-                      );
-                    }
-
-                    if (N === 3) {
-                      return (
-                        <g pointerEvents="none">
-                          <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                          <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
-                          <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
-                          <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
-                          <circle r={1.2} fill="#0f172a" />
-                        </g>
-                      );
-                    }
-
-                    // N >= 4: Regular N-gon Ring Layout
-                    const rHub = Math.max(14, 11 + N * 0.9);
-                    const rOrbit = rHub - 6.5;
-                    const rDot = Math.max(2.2, Math.min(3.2, 22 / N));
-
-                    return (
-                      <g pointerEvents="none">
-                        <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                        {colors.map((c, idx) => {
-                          const deg = -90 + (idx * 360) / N;
-                          const rad = (deg * Math.PI) / 180;
-                          const cx = Math.round(Math.cos(rad) * rOrbit * 100) / 100;
-                          const cy = Math.round(Math.sin(rad) * rOrbit * 100) / 100;
-                          return (
-                            <circle
-                              key={idx}
-                              cx={cx}
-                              cy={cy}
-                              r={rDot}
-                              fill={c}
-                            />
-                          );
-                        })}
-                        <circle r={1.4} fill="#0f172a" />
-                      </g>
-                    );
-                  })()
-                ) : st.type === 'terminal' ? (
-                  <g pointerEvents="none">
-                    <rect
-                      x={-8}
-                      y={-8}
-                      width={16}
-                      height={16}
-                      rx={3}
+                    })()
+                  ) : st.type === 'terminal' ? (
+                    <g pointerEvents="none">
+                      <rect
+                        x={-8}
+                        y={-8}
+                        width={16}
+                        height={16}
+                        rx={3}
+                        fill="#ffffff"
+                        stroke="#0f172a"
+                        strokeWidth={3}
+                      />
+                      <circle r={3} fill={primaryColor} />
+                    </g>
+                  ) : (
+                    <circle
+                      r={7}
                       fill="#ffffff"
                       stroke="#0f172a"
-                      strokeWidth={3}
+                      strokeWidth={2.5}
                     />
-                    <circle r={3} fill={primaryColor} />
+                  )}
+                </g>
+
+                {/* Upright Virtual Node indicator badge when selected */}
+                {st.isVirtual && isSelected && (
+                  <g transform={`translate(0, ${-15 * sy - 4})`} pointerEvents="none" className="export-ignore">
+                    <rect
+                      x={-28}
+                      y={-8}
+                      width={56}
+                      height={16}
+                      rx={4}
+                      fill={isLight ? '#FFFFFF' : '#0F172A'}
+                      stroke="#38BDF8"
+                      strokeWidth={1}
+                      opacity={0.95}
+                    />
+                    <text
+                      textAnchor="middle"
+                      y={3.5}
+                      className={`font-sans text-[9px] font-bold select-none ${
+                        isLight ? 'fill-sky-700' : 'fill-sky-300'
+                      }`}
+                    >
+                      虛擬節點
+                    </text>
                   </g>
-                ) : (
-                  <circle
-                    r={7}
-                    fill="#ffffff"
-                    stroke="#0f172a"
-                    strokeWidth={2.5}
-                  />
                 )}
 
-                {/* Passenger Station Labels (Only for non-virtual stations) - 支援 8 方位與直接拖曳自由站名 */}
+                {/* Passenger Station Labels (Only for non-virtual stations) - 支援 8 方位、直接拖曳自由站名與獨立縮放/旋轉 */}
                 {!st.isVirtual && (
                   <g
                     transform={`translate(${labelDx}, ${labelDy})`}
@@ -2651,65 +2993,71 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       />
                     )}
 
-                    {/* Subtle pill highlight when dragging or when selected in custom mode */}
-                    {(draggingLabelStationId === st.id || (isSelected && st.labelPosition === 'custom')) && (
+                    {/* Transformed Label Visuals (labelScale, labelRotation, opacity) */}
+                    <g
+                      transform={`rotate(${lblRot}) scale(${lblScale})`}
+                      opacity={stOpacity}
+                    >
+                      {/* Subtle pill highlight when dragging or when selected in custom mode */}
+                      {(draggingLabelStationId === st.id || (isSelected && st.labelPosition === 'custom')) && (
+                        <rect
+                          x={textAnchor === 'middle' ? -38 : textAnchor === 'end' ? -76 : -6}
+                          y={-14}
+                          width={78}
+                          height={19}
+                          rx={4}
+                          fill={isLight ? '#E0F2FE' : '#082F49'}
+                          stroke="#38BDF8"
+                          strokeWidth={1}
+                          strokeDasharray={draggingLabelStationId === st.id ? '3 2' : undefined}
+                          opacity={0.85}
+                          pointerEvents="none"
+                        />
+                      )}
+
+                      {/* Generous hit box for effortless clicking & dragging of station name label */}
                       <rect
-                        x={textAnchor === 'middle' ? -38 : textAnchor === 'end' ? -76 : -6}
-                        y={-14}
-                        width={78}
-                        height={19}
-                        rx={4}
-                        fill={isLight ? '#E0F2FE' : '#082F49'}
-                        stroke="#38BDF8"
-                        strokeWidth={1}
-                        strokeDasharray={draggingLabelStationId === st.id ? '3 2' : undefined}
-                        opacity={0.85}
-                        pointerEvents="none"
+                        x={textAnchor === 'middle' ? -48 : textAnchor === 'end' ? -96 : -8}
+                        y={-15}
+                        width={96}
+                        height={22}
+                        fill="transparent"
+                        className="cursor-grab active:cursor-grabbing"
                       />
-                    )}
 
-                    {/* Generous hit box for effortless clicking & dragging of station name label */}
-                    <rect
-                      x={textAnchor === 'middle' ? -48 : textAnchor === 'end' ? -96 : -8}
-                      y={-15}
-                      width={96}
-                      height={22}
-                      fill="transparent"
-                      className="cursor-grab active:cursor-grabbing"
-                    />
+                      {/* Stroke halo outline for clean readability across metro lines */}
+                      <text
+                        textAnchor={textAnchor}
+                        className={`font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
+                          isLight
+                            ? 'fill-white stroke-white'
+                            : 'fill-slate-950 stroke-slate-950'
+                        }`}
+                        strokeLinejoin="round"
+                      >
+                        {st.name}{' '}
+                        {st.code && (
+                          <tspan className={`font-mono text-[10px] ${isLight ? 'fill-white' : 'fill-slate-400'}`}>
+                            ({st.code})
+                          </tspan>
+                        )}
+                      </text>
 
-                    {/* Stroke halo outline for clean readability across metro lines */}
-                    <text
-                      textAnchor={textAnchor}
-                      className={`font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
-                        isLight
-                          ? 'fill-white stroke-white'
-                          : 'fill-slate-950 stroke-slate-950'
-                      }`}
-                      strokeLinejoin="round"
-                    >
-                      {st.name}{' '}
-                      {st.code && (
-                        <tspan className={`font-mono text-[10px] ${isLight ? 'fill-white' : 'fill-slate-400'}`}>
-                          ({st.code})
-                        </tspan>
-                      )}
-                    </text>
-
-                    {/* Foreground station name text */}
-                    <text
-                      textAnchor={textAnchor}
-                      className={`font-sans font-semibold text-xs select-none pointer-events-none ${
-                        isLight ? 'fill-slate-900' : 'fill-slate-100'
-                      }`}
-                    >
-                      {st.name}{' '}
-                      {st.code && (
-                        <tspan className={`font-mono text-[10px] ${isLight ? 'fill-slate-500' : 'fill-slate-300'}`}>
-                          ({st.code})
-                        </tspan>
-                      )}
-                    </text>
+                      {/* Foreground station name text */}
+                      <text
+                        textAnchor={textAnchor}
+                        className={`font-sans font-semibold text-xs select-none pointer-events-none ${
+                          isLight ? 'fill-slate-900' : 'fill-slate-100'
+                        }`}
+                      >
+                        {st.name}{' '}
+                        {st.code && (
+                          <tspan className={`font-mono text-[10px] ${isLight ? 'fill-slate-500' : 'fill-slate-300'}`}>
+                            ({st.code})
+                          </tspan>
+                        )}
+                      </text>
+                    </g>
 
                     {/* Live Dragging Offset Tooltip HUD Badge */}
                     {draggingLabelStationId === st.id && (
@@ -2737,6 +3085,326 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               </g>
             );
           })}
+
+          {/* Stage 3: Interactive Single-Station SVG Free Transform Gizmo */}
+          {selectedSingleStation &&
+            !draggingStationId &&
+            !draggingLabelStationId &&
+            toolMode !== 'connect' &&
+            onUpdateStation && (() => {
+              const st = selectedSingleStation;
+              const baseHalf = st.isVirtual ? 13 : 16;
+              const stScale = st.scale ?? 1;
+              const stScaleX = st.scaleX ?? 1;
+              const stScaleY = st.scaleY ?? 1;
+              const stRot = st.rotation ?? 0;
+              const halfW = Math.max(10, baseHalf * stScale * stScaleX);
+              const halfH = Math.max(10, baseHalf * stScale * stScaleY);
+              const invScale = 1 / Math.max(0.25, Math.min(2.5, viewTransform.scale));
+              const handleR = 4.5 * invScale;
+              const rotStem = 22 * invScale;
+
+              const beginSingleTransform = (
+                handle: TransformHandleKind,
+                e: React.PointerEvent
+              ) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const curWorld = screenToWorld(e.clientX, e.clientY, false);
+                const dx = curWorld.rawX - st.x;
+                const dy = curWorld.rawY - st.y;
+                stationTransformRef.current = {
+                  stationId: st.id,
+                  handle,
+                  centerX: st.x,
+                  centerY: st.y,
+                  baseHalf,
+                  startDist: Math.max(4, Math.hypot(dx, dy)),
+                  startAngle: (Math.atan2(dy, dx) * 180) / Math.PI,
+                  origScale: stScale,
+                  origScaleX: stScaleX,
+                  origScaleY: stScaleY,
+                  origRotation: stRot,
+                };
+              };
+
+              const corners: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'nw', x: -halfW, y: -halfH, cursor: 'nwse-resize' },
+                { kind: 'ne', x: halfW, y: -halfH, cursor: 'nesw-resize' },
+                { kind: 'se', x: halfW, y: halfH, cursor: 'nwse-resize' },
+                { kind: 'sw', x: -halfW, y: halfH, cursor: 'nesw-resize' },
+              ];
+              const edges: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'n', x: 0, y: -halfH, cursor: 'ns-resize' },
+                { kind: 'e', x: halfW, y: 0, cursor: 'ew-resize' },
+                { kind: 's', x: 0, y: halfH, cursor: 'ns-resize' },
+                { kind: 'w', x: -halfW, y: 0, cursor: 'ew-resize' },
+              ];
+
+              return (
+                <g className="export-ignore" transform={`translate(${st.x}, ${st.y})`}>
+                  <g transform={`rotate(${stRot})`}>
+                    {/* Transform Bounding Box */}
+                    <rect
+                      x={-halfW}
+                      y={-halfH}
+                      width={halfW * 2}
+                      height={halfH * 2}
+                      fill="none"
+                      stroke="#38BDF8"
+                      strokeWidth={1.4 * invScale}
+                      strokeDasharray={`${4 * invScale} ${3 * invScale}`}
+                      pointerEvents="none"
+                    />
+
+                    {/* Top Rotation Lollipop */}
+                    <line
+                      x1={0}
+                      y1={-halfH}
+                      x2={0}
+                      y2={-halfH - rotStem}
+                      stroke="#38BDF8"
+                      strokeWidth={1.4 * invScale}
+                      pointerEvents="none"
+                    />
+                    <circle
+                      cx={0}
+                      cy={-halfH - rotStem}
+                      r={handleR * 1.15}
+                      fill="#0284C7"
+                      stroke="#FFFFFF"
+                      strokeWidth={1.5 * invScale}
+                      style={{ cursor: 'grab' }}
+                      onPointerDown={(e) => beginSingleTransform('rotate', e)}
+                    />
+
+                    {/* Edge Stretch Handles (X / Y independent stretch) */}
+                    {edges.map((h) => (
+                      <rect
+                        key={h.kind}
+                        x={h.x - handleR * 0.78}
+                        y={h.y - handleR * 0.78}
+                        width={handleR * 1.56}
+                        height={handleR * 1.56}
+                        rx={1.5 * invScale}
+                        fill="#FFFFFF"
+                        stroke="#0284C7"
+                        strokeWidth={1.4 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginSingleTransform(h.kind, e)}
+                      />
+                    ))}
+
+                    {/* Corner Scale Handles (Uniform scale, Shift for free stretch) */}
+                    {corners.map((h) => (
+                      <circle
+                        key={h.kind}
+                        cx={h.x}
+                        cy={h.y}
+                        r={handleR}
+                        fill="#38BDF8"
+                        stroke="#FFFFFF"
+                        strokeWidth={1.5 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginSingleTransform(h.kind, e)}
+                      />
+                    ))}
+                  </g>
+
+                  {/* Live Numeric HUD Pill during drag */}
+                  {transformHudText && stationTransformRef.current?.stationId === st.id && (
+                    <g transform={`translate(0, ${halfH + 22 * invScale})`} pointerEvents="none">
+                      <rect
+                        x={-48 * invScale}
+                        y={-10 * invScale}
+                        width={96 * invScale}
+                        height={20 * invScale}
+                        rx={6 * invScale}
+                        fill="#0F172A"
+                        stroke="#38BDF8"
+                        strokeWidth={1.2 * invScale}
+                        opacity={0.96}
+                      />
+                      <text
+                        textAnchor="middle"
+                        y={3.5 * invScale}
+                        fill="#FFFFFF"
+                        fontSize={10 * invScale}
+                        fontWeight="700"
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {transformHudText}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
+
+          {/* Stage 3: Multi-Station Group SVG Free Transform Gizmo */}
+          {currentSelectedStationIds.length > 1 &&
+            !draggingStationId &&
+            toolMode !== 'connect' &&
+            (onBatchUpdateStations || onUpdateStationsPos) && (() => {
+              const selectedSts = stations.filter((s) => currentSelectedStationIds.includes(s.id));
+              if (selectedSts.length < 2) return null;
+
+              let minX = Infinity;
+              let maxX = -Infinity;
+              let minY = Infinity;
+              let maxY = -Infinity;
+              selectedSts.forEach((s) => {
+                minX = Math.min(minX, s.x);
+                maxX = Math.max(maxX, s.x);
+                minY = Math.min(minY, s.y);
+                maxY = Math.max(maxY, s.y);
+              });
+
+              const pad = 26;
+              const cx = (minX + maxX) / 2;
+              const cy = (minY + maxY) / 2;
+              const halfW = Math.max(28, (maxX - minX) / 2 + pad);
+              const halfH = Math.max(28, (maxY - minY) / 2 + pad);
+              const invScale = 1 / Math.max(0.25, Math.min(2.5, viewTransform.scale));
+              const handleR = 5 * invScale;
+              const rotStem = 26 * invScale;
+
+              const beginGroupTransform = (
+                handle: TransformHandleKind,
+                e: React.PointerEvent
+              ) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const curWorld = screenToWorld(e.clientX, e.clientY, false);
+                const dx = curWorld.rawX - cx;
+                const dy = curWorld.rawY - cy;
+                groupTransformRef.current = {
+                  handle,
+                  cx,
+                  cy,
+                  halfW,
+                  halfH,
+                  startAngle: (Math.atan2(dy, dx) * 180) / Math.PI,
+                  startDist: Math.max(8, Math.hypot(dx, dy)),
+                  initialStations: selectedSts.map((s) => ({
+                    id: s.id,
+                    x: s.x,
+                    y: s.y,
+                    scale: s.scale ?? 1,
+                  })),
+                };
+              };
+
+              const corners: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'nw', x: -halfW, y: -halfH, cursor: 'nwse-resize' },
+                { kind: 'ne', x: halfW, y: -halfH, cursor: 'nesw-resize' },
+                { kind: 'se', x: halfW, y: halfH, cursor: 'nwse-resize' },
+                { kind: 'sw', x: -halfW, y: halfH, cursor: 'nesw-resize' },
+              ];
+              const edges: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'n', x: 0, y: -halfH, cursor: 'ns-resize' },
+                { kind: 'e', x: halfW, y: 0, cursor: 'ew-resize' },
+                { kind: 's', x: 0, y: halfH, cursor: 'ns-resize' },
+                { kind: 'w', x: -halfW, y: 0, cursor: 'ew-resize' },
+              ];
+
+              return (
+                <g className="export-ignore" transform={`translate(${cx}, ${cy})`}>
+                  <rect
+                    x={-halfW}
+                    y={-halfH}
+                    width={halfW * 2}
+                    height={halfH * 2}
+                    fill="rgba(99, 102, 241, 0.04)"
+                    stroke="#818CF8"
+                    strokeWidth={1.6 * invScale}
+                    strokeDasharray={`${5 * invScale} ${3 * invScale}`}
+                    rx={4 * invScale}
+                    pointerEvents="none"
+                  />
+
+                  {/* Top Group Rotation Handle */}
+                  <line
+                    x1={0}
+                    y1={-halfH}
+                    x2={0}
+                    y2={-halfH - rotStem}
+                    stroke="#818CF8"
+                    strokeWidth={1.6 * invScale}
+                    pointerEvents="none"
+                  />
+                  <circle
+                    cx={0}
+                    cy={-halfH - rotStem}
+                    r={handleR * 1.15}
+                    fill="#4F46E5"
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5 * invScale}
+                    style={{ cursor: 'grab' }}
+                    onPointerDown={(e) => beginGroupTransform('rotate', e)}
+                  />
+
+                  {/* Edge Stretch Handles */}
+                  {edges.map((h) => (
+                    <rect
+                      key={h.kind}
+                      x={h.x - handleR * 0.8}
+                      y={h.y - handleR * 0.8}
+                      width={handleR * 1.6}
+                      height={handleR * 1.6}
+                      rx={1.5 * invScale}
+                      fill="#FFFFFF"
+                      stroke="#4F46E5"
+                      strokeWidth={1.5 * invScale}
+                      style={{ cursor: h.cursor }}
+                      onPointerDown={(e) => beginGroupTransform(h.kind, e)}
+                    />
+                  ))}
+
+                  {/* Corner Group Scale Handles */}
+                  {corners.map((h) => (
+                    <circle
+                      key={h.kind}
+                      cx={h.x}
+                      cy={h.y}
+                      r={handleR}
+                      fill="#6366F1"
+                      stroke="#FFFFFF"
+                      strokeWidth={1.5 * invScale}
+                      style={{ cursor: h.cursor }}
+                      onPointerDown={(e) => beginGroupTransform(h.kind, e)}
+                    />
+                  ))}
+
+                  {/* Group Transform Live HUD Pill */}
+                  {transformHudText && groupTransformRef.current && (
+                    <g transform={`translate(0, ${halfH + 22 * invScale})`} pointerEvents="none">
+                      <rect
+                        x={-56 * invScale}
+                        y={-10 * invScale}
+                        width={112 * invScale}
+                        height={20 * invScale}
+                        rx={6 * invScale}
+                        fill="#1E1B4B"
+                        stroke="#818CF8"
+                        strokeWidth={1.2 * invScale}
+                        opacity={0.96}
+                      />
+                      <text
+                        textAnchor="middle"
+                        y={3.5 * invScale}
+                        fill="#FFFFFF"
+                        fontSize={10 * invScale}
+                        fontWeight="700"
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {transformHudText}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
 
           {/* Shortest Path Sequential Station Markers & Badges */}
           {showShortestPathPreview && shortestPathResult && shortestPathResult.stationIds.length >= 2 && (
@@ -2846,45 +3514,80 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
       {/* Floating Batch Selection Control Bar */}
       {currentSelectedStationIds.length > 1 && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-2xl shadow-xl backdrop-blur-md border animate-in fade-in slide-in-from-top-2 duration-150 select-none bg-slate-900/95 border-slate-700 text-white max-w-[95vw]">
-          <div className="flex items-center gap-1.5 pr-2 border-r border-slate-700/80">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            <span className="text-xs font-semibold text-indigo-300 font-mono">
-              已框選 {currentSelectedStationIds.length} 個站點
-            </span>
-            <span className="text-[11px] text-slate-400 hidden md:inline ml-1">
-              (拖曳任一站點批次移動)
-            </span>
-          </div>
+        <div
+          className={`absolute top-12 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-lg border select-none max-w-[95vw] ${
+            isLight
+              ? 'bg-white/95 border-zinc-200 text-zinc-800'
+              : 'bg-[#111113]/95 border-zinc-800 text-zinc-100'
+          }`}
+        >
+          <span
+            className={`text-xs font-mono tabular-nums pr-2 border-r ${
+              isLight ? 'border-zinc-200 text-zinc-700' : 'border-zinc-800 text-zinc-300'
+            }`}
+          >
+            已選 {currentSelectedStationIds.length} 站
+          </span>
 
-          {/* Quick Batch Alignment Tools */}
           <button
             onClick={handleBatchAlignY}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700"
+            className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+              isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
+            }`}
             title="將選取站點水平對齊 (相同 Y 坐標)"
           >
-            <span>水平對齊</span>
+            水平對齊
           </button>
 
           <button
             onClick={handleBatchAlignX}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700"
+            className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+              isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
+            }`}
             title="將選取站點垂直對齊 (相同 X 坐標)"
           >
-            <span>垂直對齊</span>
+            垂直對齊
           </button>
 
           {currentSelectedStationIds.length >= 3 && (
             <button
               onClick={handleBatchDistributeH}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer border border-slate-700 hidden sm:flex"
+              className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer hidden sm:inline-flex ${
+                isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
+              }`}
               title="水平等距分散排列選取之站點"
             >
-              <span>等距排列</span>
+              等距排列
             </button>
           )}
 
-          {/* Batch Delete */}
+          {onBatchUpdateStationsZIndex && (
+            <div className={`flex items-center gap-1 pl-1.5 border-l ${isLight ? 'border-zinc-200' : 'border-zinc-800'}`}>
+              <button
+                type="button"
+                onClick={() => onBatchUpdateStationsZIndex(currentSelectedStationIds, -1)}
+                className={`flex items-center gap-0.5 px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
+                }`}
+                title="往下一層 (-1) · 快捷鍵 ["
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">往下</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onBatchUpdateStationsZIndex(currentSelectedStationIds, 1)}
+                className={`flex items-center gap-0.5 px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
+                }`}
+                title="往上一層 (+1) · 快捷鍵 ]"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">往上</span>
+              </button>
+            </div>
+          )}
+
           <button
             onClick={() => {
               if (onBatchDeleteStations) {
@@ -2893,25 +3596,288 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 onDeleteSelected();
               }
             }}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 transition-colors cursor-pointer border border-rose-500/40"
+            className="px-2 py-1 text-xs font-medium rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
             title="批次刪除選取之所有站點 (Delete)"
           >
-            <span>刪除 ({currentSelectedStationIds.length})</span>
+            刪除 ({currentSelectedStationIds.length})
           </button>
 
-          {/* Deselect */}
           <button
             onClick={() => {
               onSelectStationIds?.([]);
               onSelectStation(null);
             }}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer ml-1"
+            className={`p-1 rounded-md transition-colors cursor-pointer ${
+              isLight ? 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
+            }`}
             title="取消選取 (Esc)"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
+
+      {/* Floating Single Element Quick Controls */}
+      {((selectedConn && onUpdateConnectionZIndex) ||
+        (selectedSingleStation && onUpdateStationZIndex)) && (() => {
+        const isConn = Boolean(selectedConn);
+        const currentZ = clampZOrder(
+          isConn ? selectedConn?.zIndex ?? 0 : selectedSingleStation?.zIndex ?? 0
+        );
+        const setZ = (next: number) => {
+          const clamped = clampZOrder(next);
+          if (isConn && selectedConn && onUpdateConnectionZIndex) {
+            onUpdateConnectionZIndex(selectedConn.id, clamped);
+          } else if (selectedSingleStation && onUpdateStationZIndex) {
+            onUpdateStationZIndex(selectedSingleStation.id, clamped);
+          }
+        };
+        const labelText = isConn
+          ? '路線段'
+          : selectedSingleStation?.isVirtual
+          ? '虛擬節點'
+          : selectedSingleStation?.name || '車站';
+
+        const btnClass = `px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+          isLight
+            ? 'text-zinc-700 hover:bg-zinc-100'
+            : 'text-zinc-300 hover:bg-zinc-800'
+        }`;
+
+        return (
+          <div
+            className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2.5 py-1 rounded-lg shadow-lg border select-none transition-colors max-w-[92vw] ${
+              isLight
+                ? 'bg-white/95 border-zinc-200 text-zinc-800'
+                : 'bg-[#111113]/95 border-zinc-800 text-zinc-100'
+            }`}
+          >
+            <div
+              className={`flex items-center gap-1.5 pr-2 border-r text-xs ${
+                isLight ? 'border-zinc-200' : 'border-zinc-800'
+              }`}
+            >
+              <Layers className={`w-3.5 h-3.5 shrink-0 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`} />
+              <span className="font-medium truncate max-w-[90px] hidden sm:inline">
+                {labelText}
+              </span>
+              <span className="font-mono text-[11px] font-semibold tabular-nums">
+                {currentZ > 0 ? `+${currentZ}` : currentZ}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setZ(MIN_Z_ORDER)}
+              disabled={currentZ <= MIN_Z_ORDER}
+              className={btnClass}
+              title="移至最底層 (-10) · Shift+["
+            >
+              <ArrowDownToLine className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setZ(currentZ - 1)}
+              disabled={currentZ <= MIN_Z_ORDER}
+              className={`flex items-center gap-0.5 ${btnClass}`}
+              title="往下一層 (-1) · 快捷鍵 ["
+            >
+              <ArrowDown className="w-3.5 h-3.5" />
+              <span>往下</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setZ(currentZ + 1)}
+              disabled={currentZ >= MAX_Z_ORDER}
+              className={`flex items-center gap-0.5 ${btnClass}`}
+              title="往上一層 (+1) · 快捷鍵 ]"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+              <span>往上</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setZ(MAX_Z_ORDER)}
+              disabled={currentZ >= MAX_Z_ORDER}
+              className={btnClass}
+              title="移至最上層 (+10) · Shift+]"
+            >
+              <ArrowUpToLine className="w-3.5 h-3.5" />
+            </button>
+
+            {currentZ !== 0 && (
+              <button
+                type="button"
+                onClick={() => setZ(0)}
+                className={btnClass}
+                title="重設為預設層級 (0)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Quick Parallel Offset & Stroke Width Controls */}
+            {isConn && selectedConn && (onUpdateConnectionOffset || onUpdateConnectionStyle) && (
+              <div
+                className={`flex items-center gap-1 pl-2 ml-0.5 border-l ${
+                  isLight ? 'border-zinc-200' : 'border-zinc-800'
+                }`}
+              >
+                {onUpdateConnectionOffset && (() => {
+                  const curOffset = clampLineOffset(selectedConn.offset ?? 0);
+                  return (
+                    <div className="flex items-center gap-0.5">
+                      <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                        偏移
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateConnectionOffset(selectedConn.id, clampLineOffset(curOffset - 1))}
+                        className={`${btnClass} font-mono`}
+                        title="往負方向偏移 -1"
+                      >
+                        -1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateConnectionOffset(selectedConn.id, 0)}
+                        className={`${btnClass} font-mono tabular-nums font-semibold`}
+                        title="點擊歸零偏移 (0)"
+                      >
+                        {curOffset > 0 ? `+${curOffset}` : curOffset}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateConnectionOffset(selectedConn.id, clampLineOffset(curOffset + 1))}
+                        className={`${btnClass} font-mono`}
+                        title="往正方向偏移 +1"
+                      >
+                        +1
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {onUpdateConnectionStyle && (() => {
+                  const curWidth = normalizeStrokeWidth(selectedConn.strokeWidth ?? 6);
+                  return (
+                    <div
+                      className={`flex items-center gap-0.5 pl-1.5 border-l ${
+                        isLight ? 'border-zinc-200' : 'border-zinc-800'
+                      }`}
+                    >
+                      <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                        粗細
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRecordHistory?.();
+                          onUpdateConnectionStyle(selectedConn.id, {
+                            strokeWidth: normalizeStrokeWidth(curWidth - 1),
+                          });
+                        }}
+                        className={`${btnClass} font-mono`}
+                        title="減細線寬 (-1)"
+                      >
+                        -1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRecordHistory?.();
+                          onUpdateConnectionStyle(selectedConn.id, { strokeWidth: 6 });
+                        }}
+                        className={`${btnClass} font-mono tabular-nums font-semibold`}
+                        title="點擊重設為預設線寬 (6)"
+                      >
+                        {curWidth}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRecordHistory?.();
+                          onUpdateConnectionStyle(selectedConn.id, {
+                            strokeWidth: normalizeStrokeWidth(curWidth + 1),
+                          });
+                        }}
+                        className={`${btnClass} font-mono`}
+                        title="加粗線寬 (+1)"
+                      >
+                        +1
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Quick Station SVG Scale Controls */}
+            {!isConn && selectedSingleStation && onUpdateStation && (() => {
+              const curScale = normalizeSvgScale(selectedSingleStation.scale ?? 1);
+              return (
+                <div
+                  className={`flex items-center gap-0.5 pl-2 ml-0.5 border-l ${
+                    isLight ? 'border-zinc-200' : 'border-zinc-800'
+                  }`}
+                >
+                  <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    縮放
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateStation({
+                        ...selectedSingleStation,
+                        scale: normalizeSvgScale(curScale - 0.2),
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="縮小 (-0.2×)"
+                  >
+                    -0.2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateStation({
+                        ...selectedSingleStation,
+                        scale: 1,
+                        scaleX: 1,
+                        scaleY: 1,
+                        rotation: 0,
+                      });
+                    }}
+                    className={`${btnClass} font-mono tabular-nums font-semibold`}
+                    title="點擊重設縮放與旋轉 (1×)"
+                  >
+                    {curScale}×
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateStation({
+                        ...selectedSingleStation,
+                        scale: normalizeSvgScale(curScale + 0.2),
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="放大 (+0.2×)"
+                  >
+                    +0.2
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
     </div>
   );
 };

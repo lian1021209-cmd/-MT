@@ -99,26 +99,53 @@ export function prepareSvgForExport(
     let maxY = -Infinity;
 
     stations.forEach((st) => {
-      minX = Math.min(minX, st.x);
-      maxX = Math.max(maxX, st.x);
-      minY = Math.min(minY, st.y);
-      maxY = Math.max(maxY, st.y);
+      const markerHalf =
+        (st.isVirtual ? 12 : 18) *
+        (st.scale ?? 1) *
+        Math.max(st.scaleX ?? 1, st.scaleY ?? 1);
+      minX = Math.min(minX, st.x - markerHalf);
+      maxX = Math.max(maxX, st.x + markerHalf);
+      minY = Math.min(minY, st.y - markerHalf);
+      maxY = Math.max(maxY, st.y + markerHalf);
 
+      const lblScale = st.labelScale ?? 1;
       if (st.labelOffset) {
-        minX = Math.min(minX, st.x + st.labelOffset.x - 45);
-        maxX = Math.max(maxX, st.x + st.labelOffset.x + 45);
-        minY = Math.min(minY, st.y + st.labelOffset.y - 25);
-        maxY = Math.max(maxY, st.y + st.labelOffset.y + 25);
+        minX = Math.min(minX, st.x + st.labelOffset.x - 45 * lblScale);
+        maxX = Math.max(maxX, st.x + st.labelOffset.x + 45 * lblScale);
+        minY = Math.min(minY, st.y + st.labelOffset.y - 25 * lblScale);
+        maxY = Math.max(maxY, st.y + st.labelOffset.y + 25 * lblScale);
+      } else if (!st.isVirtual && lblScale > 1) {
+        minX = Math.min(minX, st.x - 45 * lblScale);
+        maxX = Math.max(maxX, st.x + 45 * lblScale);
+        minY = Math.min(minY, st.y - 25 * lblScale);
+        maxY = Math.max(maxY, st.y + 25 * lblScale);
       }
     });
 
     connections.forEach((conn) => {
+      const margin = Math.abs(conn.offset ?? 0) + (conn.strokeWidth ?? 6) / 2;
+      if (margin > 0) {
+        const fromSt = stations.find((s) => s.id === conn.fromStationId);
+        const toSt = stations.find((s) => s.id === conn.toStationId);
+        if (fromSt) {
+          minX = Math.min(minX, fromSt.x - margin);
+          maxX = Math.max(maxX, fromSt.x + margin);
+          minY = Math.min(minY, fromSt.y - margin);
+          maxY = Math.max(maxY, fromSt.y + margin);
+        }
+        if (toSt) {
+          minX = Math.min(minX, toSt.x - margin);
+          maxX = Math.max(maxX, toSt.x + margin);
+          minY = Math.min(minY, toSt.y - margin);
+          maxY = Math.max(maxY, toSt.y + margin);
+        }
+      }
       if (conn.waypoints) {
         conn.waypoints.forEach((pt) => {
-          minX = Math.min(minX, pt.x);
-          maxX = Math.max(maxX, pt.x);
-          minY = Math.min(minY, pt.y);
-          maxY = Math.max(maxY, pt.y);
+          minX = Math.min(minX, pt.x - margin);
+          maxX = Math.max(maxX, pt.x + margin);
+          minY = Math.min(minY, pt.y - margin);
+          maxY = Math.max(maxY, pt.y + margin);
         });
       }
     });
