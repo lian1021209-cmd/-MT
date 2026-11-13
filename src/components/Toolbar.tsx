@@ -4,7 +4,11 @@ import {
   Trash2, 
   Sparkles,
   Move,
-  Crosshair
+  Crosshair,
+  Keyboard,
+  Undo2,
+  Redo2,
+  BarChart3
 } from 'lucide-react';
 import { RouteType, EffectiveTheme } from '../types/metro';
 
@@ -20,6 +24,13 @@ interface ToolbarProps {
   stationCount: number;
   connectionCount: number;
   theme?: EffectiveTheme;
+  onOpenShortcuts?: () => void;
+  canUndo?: boolean;
+  onUndo?: () => void;
+  canRedo?: boolean;
+  onRedo?: () => void;
+  onOpenStats?: () => void;
+  isStatsActive?: boolean;
 }
 
 export const ROUTE_TYPE_OPTIONS: { type: RouteType; label: string; desc: string; icon: string }[] = [
@@ -43,6 +54,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   stationCount,
   connectionCount,
   theme = 'dark',
+  onOpenShortcuts,
+  canUndo = false,
+  onUndo,
+  canRedo = false,
+  onRedo,
+  onOpenStats,
+  isStatsActive = false,
 }) => {
   const isLight = theme === 'light';
 
@@ -176,6 +194,47 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </button>
           )}
         </div>
+
+        {/* Undo / Redo History Buttons */}
+        <div
+          className={`flex items-center p-1 rounded-xl border gap-0.5 shadow-inner transition-colors ${
+            isLight
+              ? 'bg-slate-200/70 border-slate-300'
+              : 'bg-slate-950 border-slate-800'
+          }`}
+        >
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
+              !canUndo
+                ? 'opacity-35 cursor-not-allowed text-slate-400'
+                : isLight
+                ? 'text-slate-700 hover:text-slate-950 hover:bg-white shadow-2xs cursor-pointer'
+                : 'text-slate-200 hover:text-white hover:bg-slate-850 cursor-pointer'
+            }`}
+            title="復原上一步 (Ctrl+Z / ⌘Z)"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">復原</span>
+          </button>
+
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
+              !canRedo
+                ? 'opacity-35 cursor-not-allowed text-slate-400'
+                : isLight
+                ? 'text-slate-700 hover:text-slate-950 hover:bg-white shadow-2xs cursor-pointer'
+                : 'text-slate-200 hover:text-white hover:bg-slate-850 cursor-pointer'
+            }`}
+            title="重做下一步 (Ctrl+Y / ⌘Y / ⌘⇧Z)"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">重做</span>
+          </button>
+        </div>
       </div>
 
       {/* Right side: Stats & Action buttons */}
@@ -193,6 +252,58 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             連線: <strong className={`font-mono ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>{connectionCount}</strong>
           </span>
         </div>
+
+        {onOpenStats && (
+          <button
+            onClick={onOpenStats}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
+              isStatsActive
+                ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-xs'
+                : isLight
+                ? 'text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 border-indigo-200 shadow-2xs'
+                : 'text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 hover:text-white border-indigo-800/60'
+            }`}
+            title="開啟階段二路網統計面板與各色路線圓餅佔比圖表"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>路網統計</span>
+            <span
+              className={`text-[9.5px] font-mono px-1 py-0.2 rounded border hidden sm:inline ${
+                isStatsActive
+                  ? 'bg-indigo-700 text-white border-indigo-500 font-bold'
+                  : isLight
+                  ? 'bg-white text-indigo-600 border-indigo-200'
+                  : 'bg-indigo-900/80 text-indigo-200 border-indigo-700/60'
+              }`}
+            >
+              二階
+            </span>
+          </button>
+        )}
+
+        {onOpenShortcuts && (
+          <button
+            onClick={onOpenShortcuts}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
+              isLight
+                ? 'text-indigo-700 bg-indigo-50/90 hover:bg-indigo-100 hover:text-indigo-900 border-indigo-200 shadow-2xs'
+                : 'text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 hover:text-white border-indigo-800/60'
+            }`}
+            title="開啟快捷鍵說明 (按鍵盤 ? 或 F1 亦可開啟)"
+          >
+            <Keyboard className="w-3.5 h-3.5 text-indigo-500" />
+            <span>快捷鍵</span>
+            <kbd
+              className={`text-[10px] font-mono px-1 py-0.2 rounded border hidden sm:inline ${
+                isLight
+                  ? 'bg-white text-indigo-600 border-indigo-200'
+                  : 'bg-indigo-900/80 text-indigo-200 border-indigo-700/60'
+              }`}
+            >
+              ?
+            </kbd>
+          </button>
+        )}
 
         <button
           onClick={onLoadDemo}

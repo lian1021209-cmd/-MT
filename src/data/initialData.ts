@@ -9,16 +9,18 @@ export const DEFAULT_LINES: MetroLine[] = [
   { id: 'line-o', name: '中和新蘆線 (橘線)', code: 'O', color: '#EA580C', width: 6 },
   { id: 'line-br', name: '文湖線 (棕線)', code: 'BR', color: '#854D0E', width: 6 },
   { id: 'line-y', name: '環狀線 (黃線)', code: 'Y', color: '#CA8A04', width: 6 },
+  { id: 'line-a', name: '桃園機場捷運 (紫線)', code: 'A', color: '#9333EA', width: 6 },
 ];
 
 export const DEMO_STATIONS: Station[] = [
-  { id: 'st-1', name: '台北車站', code: 'R10', x: 400, y: 300, type: 'interchange', labelPosition: 'top' },
+  { id: 'st-1', name: '台北車站', code: 'R10', x: 400, y: 300, type: 'interchange_3line', interchangeStyle: 'dots', labelPosition: 'top' },
   { id: 'st-2', name: '中山', code: 'R11', x: 400, y: 220, type: 'interchange', labelPosition: 'right' },
   { id: 'st-3', name: '雙連', code: 'R12', x: 400, y: 140, type: 'regular', labelPosition: 'right' },
   { id: 'st-4', name: '善導寺', code: 'BL13', x: 500, y: 300, type: 'regular', labelPosition: 'bottom' },
   { id: 'st-5', name: '忠孝新生', code: 'BL14', x: 600, y: 300, type: 'interchange', labelPosition: 'bottom' },
   { id: 'st-6', name: '西門', code: 'BL11', x: 300, y: 300, type: 'interchange', labelPosition: 'bottom' },
   { id: 'st-7', name: '北門', code: 'G13', x: 300, y: 220, type: 'regular', labelPosition: 'left' },
+  { id: 'st-8', name: '三重 (機捷)', code: 'A2', x: 260, y: 380, type: 'regular', labelPosition: 'bottom' },
 ];
 
 export const DEMO_CONNECTIONS: Connection[] = [
@@ -29,4 +31,5 @@ export const DEMO_CONNECTIONS: Connection[] = [
   { id: 'conn-5', fromStationId: 'st-4', toStationId: 'st-5', color: '#2563EB', routeType: '135_bend', lineId: 'line-bl' },
   { id: 'conn-6', fromStationId: 'st-6', toStationId: 'st-7', color: '#16A34A', routeType: '135_bend', lineId: 'line-g' },
   { id: 'conn-7', fromStationId: 'st-7', toStationId: 'st-2', color: '#16A34A', routeType: '135_bend', lineId: 'line-g' },
+  { id: 'conn-8', fromStationId: 'st-1', toStationId: 'st-8', color: '#9333EA', routeType: '135_bend', lineId: 'line-a' },
 ];

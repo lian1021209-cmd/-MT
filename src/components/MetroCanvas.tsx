@@ -16,6 +16,7 @@ import {
   getSmoothCatmullRomPath,
   simplifyPoints
 } from '../utils/geometry';
+import { ShortestPathResult } from '../utils/pathfinding';
 import { 
   Plus, 
   Minus, 
@@ -77,7 +78,10 @@ interface MetroCanvasProps {
   ) => void;
   onUpdateConnectionWaypoints: (connId: string, waypoints: Point[]) => void;
   onDeleteSelected: () => void;
+  onRecordHistory?: () => void;
   theme?: EffectiveTheme;
+  shortestPathResult?: ShortestPathResult | null;
+  showShortestPathPreview?: boolean;
 }
 
 export const MetroCanvas: React.FC<MetroCanvasProps> = ({
@@ -105,7 +109,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   onAddConnection,
   onUpdateConnectionWaypoints,
   onDeleteSelected,
+  onRecordHistory,
   theme = 'dark',
+  shortestPathResult,
+  showShortestPathPreview = true,
 }) => {
   const isLight = theme === 'light';
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +143,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   const marqueeRef = useRef<{
     startWorldX: number;
     startWorldY: number;
+    startClientX: number;
+    startClientY: number;
+    hasDragged: boolean;
     initialSelectedIds: string[];
     isAdditive: boolean;
   } | null>(null);
@@ -150,6 +160,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     startStationY: number;
     batchStationIds: string[];
     initialPositions: Record<string, { x: number; y: number }>;
+    hasRecordedHistory?: boolean;
   } | null>(null);
 
   // Draggable Station Name tracking (自由站名可拖動)
@@ -160,12 +171,17 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     startClientY: number;
     origDx: number;
     origDy: number;
+    hasRecordedHistory?: boolean;
   } | null>(null);
 
   // Active 8-direction alignment guides during station dragging
   const [activeAlignmentGuides, setActiveAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const isCtrlPressedRef = useRef(false);
   const [isCtrlDown, setIsCtrlDown] = useState(false);
+  const isShiftPressedRef = useRef(false);
+  const [isShiftDown, setIsShiftDown] = useState(false);
+  const isSpacePressedRef = useRef(false);
+  const [isSpaceDown, setIsSpaceDown] = useState(false);
 
   // Active equal-distance red dashed guides (已有線段時，另一節點連線產生紅色虛線讓線段等距)
   const [activeEqualDistanceGuide, setActiveEqualDistanceGuide] = useState<EqualDistanceGuide | null>(null);
@@ -186,6 +202,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     startWorldX: number;
     startWorldY: number;
     origPoint: Point;
+    hasRecordedHistory?: boolean;
   } | null>(null);
   const [draggingWaypointInfo, setDraggingWaypointInfo] = useState<{
     connId: string;
@@ -232,12 +249,28 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     }
   }, [toolMode]);
 
-  // Track Ctrl / Meta key state for 8-direction node alignment
+  // Track Ctrl / Meta / Shift key state for alignment and multi-selection
   useEffect(() => {
     const handleKeyChange = (e: KeyboardEvent) => {
       const isCtrl = e.ctrlKey || e.metaKey;
       isCtrlPressedRef.current = isCtrl;
       setIsCtrlDown(isCtrl);
+
+      const isShift = e.shiftKey;
+      isShiftPressedRef.current = isShift;
+      setIsShiftDown(isShift);
+
+      if (e.code === 'Space' || e.key === ' ') {
+        if (e.type === 'keydown') {
+          if (!isSpacePressedRef.current) {
+            isSpacePressedRef.current = true;
+            setIsSpaceDown(true);
+          }
+        } else if (e.type === 'keyup') {
+          isSpacePressedRef.current = false;
+          setIsSpaceDown(false);
+        }
+      }
     };
 
     window.addEventListener('keydown', handleKeyChange);
@@ -248,10 +281,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     };
   }, []);
 
-  // Keyboard events: Delete to remove, Esc to cancel, V/A/X/C shortcuts
+  // Keyboard events: Delete to remove, Esc to cancel, Space to pan, V/A/X/C shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -290,6 +327,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     if (currentSelectedStationIds.length < 2) return;
     const selectedStations = stations.filter((s) => currentSelectedStationIds.includes(s.id));
     if (selectedStations.length < 2) return;
+    onRecordHistory?.();
     const targetY = selectedStations[0].y;
     const updates = selectedStations.map((s) => ({ id: s.id, x: s.x, y: targetY }));
     if (onUpdateStationsPos) {
@@ -303,6 +341,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     if (currentSelectedStationIds.length < 2) return;
     const selectedStations = stations.filter((s) => currentSelectedStationIds.includes(s.id));
     if (selectedStations.length < 2) return;
+    onRecordHistory?.();
     const targetX = selectedStations[0].x;
     const updates = selectedStations.map((s) => ({ id: s.id, x: targetX, y: s.y }));
     if (onUpdateStationsPos) {
@@ -318,6 +357,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       .filter((s) => currentSelectedStationIds.includes(s.id))
       .sort((a, b) => a.x - b.x);
     if (sorted.length < 3) return;
+    onRecordHistory?.();
     const minX = sorted[0].x;
     const maxX = sorted[sorted.length - 1].x;
     const step = (maxX - minX) / (sorted.length - 1);
@@ -465,34 +505,54 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
       // 框選多個站點 (Marquee box selection drag)
       if (marqueeRef.current) {
-        const curWorld = screenToWorld(e.clientX, e.clientY, false);
-        const startX = marqueeRef.current.startWorldX;
-        const startY = marqueeRef.current.startWorldY;
-        const endX = curWorld.rawX;
-        const endY = curWorld.rawY;
+        const moveDist = Math.hypot(
+          e.clientX - marqueeRef.current.startClientX,
+          e.clientY - marqueeRef.current.startClientY
+        );
 
-        setMarqueeBox({
-          startX,
-          startY,
-          endX,
-          endY,
-        });
+        if (!marqueeRef.current.hasDragged && moveDist >= 3) {
+          marqueeRef.current.hasDragged = true;
+        }
 
-        const minX = Math.min(startX, endX);
-        const maxX = Math.max(startX, endX);
-        const minY = Math.min(startY, endY);
-        const maxY = Math.max(startY, endY);
+        if (marqueeRef.current.hasDragged) {
+          const curWorld = screenToWorld(e.clientX, e.clientY, false);
+          const startX = marqueeRef.current.startWorldX;
+          const startY = marqueeRef.current.startWorldY;
+          const endX = curWorld.rawX;
+          const endY = curWorld.rawY;
 
-        const insideIds = stations
-          .filter((st) => st.x >= minX && st.x <= maxX && st.y >= minY && st.y <= maxY)
-          .map((st) => st.id);
+          setMarqueeBox({
+            startX,
+            startY,
+            endX,
+            endY,
+          });
 
-        const combined = Array.from(new Set([...marqueeRef.current.initialSelectedIds, ...insideIds]));
-        onSelectStationIds?.(combined);
-        if (combined.length === 1) {
-          onSelectStation(combined[0]);
-        } else if (combined.length > 1) {
-          onSelectStation(combined[0]);
+          const minX = Math.min(startX, endX);
+          const maxX = Math.max(startX, endX);
+          const minY = Math.min(startY, endY);
+          const maxY = Math.max(startY, endY);
+
+          // Find stations overlapping or inside selection box (with tolerance for station radius)
+          const insideIds = stations
+            .filter((st) => {
+              const radius = st.isVirtual ? 6 : 14;
+              return (
+                st.x + radius >= minX &&
+                st.x - radius <= maxX &&
+                st.y + radius >= minY &&
+                st.y - radius <= maxY
+              );
+            })
+            .map((st) => st.id);
+
+          const combined = Array.from(new Set([...marqueeRef.current.initialSelectedIds, ...insideIds]));
+          onSelectStationIds?.(combined);
+          if (combined.length > 0) {
+            onSelectStation(combined[0]);
+          } else {
+            onSelectStation(null);
+          }
         }
         return;
       }
@@ -502,6 +562,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         const { stationId, startClientX, startClientY, origDx, origDy } = labelDragRef.current;
         const deltaX = (e.clientX - startClientX) / viewTransform.scale;
         const deltaY = (e.clientY - startClientY) / viewTransform.scale;
+
+        if (!labelDragRef.current.hasRecordedHistory && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+          labelDragRef.current.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
         const newDx = Math.round(origDx + deltaX);
         const newDy = Math.round(origDy + deltaY);
 
@@ -671,6 +737,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         const { connId, index, startWorldX, startWorldY, origPoint } = waypointDragRef.current;
         const deltaX = worldPos.rawX - startWorldX;
         const deltaY = worldPos.rawY - startWorldY;
+
+        if (!waypointDragRef.current.hasRecordedHistory && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+          waypointDragRef.current.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
         const rawTargetX = origPoint.x + deltaX;
         const rawTargetY = origPoint.y + deltaY;
         const newX = gridSnap ? snapToGrid(rawTargetX, gridSize) : Math.round(rawTargetX);
@@ -690,6 +762,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         const { stationId, startWorldX, startWorldY, startStationX, startStationY, batchStationIds, initialPositions } = dragInfoRef.current;
         const deltaX = worldPos.rawX - startWorldX;
         const deltaY = worldPos.rawY - startWorldY;
+
+        if (!dragInfoRef.current.hasRecordedHistory && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+          dragInfoRef.current.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
         const candX = Math.round(startStationX + deltaX);
         const candY = Math.round(startStationY + deltaY);
 
@@ -969,28 +1047,44 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
       // Release marquee box selection
       if (marqueeRef.current) {
+        const info = marqueeRef.current;
+        const didDrag = info.hasDragged;
         const curWorld = screenToWorld(e.clientX, e.clientY, false);
-        const startX = marqueeRef.current.startWorldX;
-        const startY = marqueeRef.current.startWorldY;
+        const startX = info.startWorldX;
+        const startY = info.startWorldY;
         const endX = curWorld.rawX;
         const endY = curWorld.rawY;
 
-        const minX = Math.min(startX, endX);
-        const maxX = Math.max(startX, endX);
-        const minY = Math.min(startY, endY);
-        const maxY = Math.max(startY, endY);
+        marqueeRef.current = null;
+        setMarqueeBox(null);
 
-        const width = maxX - minX;
-        const height = maxY - minY;
-
-        if (width < 6 && height < 6 && !marqueeRef.current.isAdditive) {
-          onSelectStationIds?.([]);
-          onSelectStation(null);
+        if (!didDrag) {
+          // Clean click on empty canvas without dragging: clear selection
+          if (!info.isAdditive) {
+            onSelectStationIds?.([]);
+            onSelectStation(null);
+            onSelectConnection(null);
+          }
         } else {
+          // Finalize selection from drag
+          const minX = Math.min(startX, endX);
+          const maxX = Math.max(startX, endX);
+          const minY = Math.min(startY, endY);
+          const maxY = Math.max(startY, endY);
+
           const insideIds = stations
-            .filter((st) => st.x >= minX && st.x <= maxX && st.y >= minY && st.y <= maxY)
+            .filter((st) => {
+              const radius = st.isVirtual ? 6 : 14;
+              return (
+                st.x + radius >= minX &&
+                st.x - radius <= maxX &&
+                st.y + radius >= minY &&
+                st.y - radius <= maxY
+              );
+            })
             .map((st) => st.id);
-          const combined = Array.from(new Set([...marqueeRef.current.initialSelectedIds, ...insideIds]));
+
+          const combined = Array.from(new Set([...info.initialSelectedIds, ...insideIds]));
           onSelectStationIds?.(combined);
           if (combined.length > 0) {
             onSelectStation(combined[0]);
@@ -998,9 +1092,6 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             onSelectStation(null);
           }
         }
-
-        marqueeRef.current = null;
-        setMarqueeBox(null);
         return;
       }
 
@@ -1155,6 +1246,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       canvasPointerDownRef.current = null;
       hasDraggedCanvasRef.current = false;
       setIsPanning(false);
+      isSpacePressedRef.current = false;
+      setIsSpaceDown(false);
+      isShiftPressedRef.current = false;
+      setIsShiftDown(false);
     };
 
     window.addEventListener('pointermove', handleWindowPointerMove);
@@ -1226,28 +1321,40 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       }
     }
 
-    // Check if user initiated a marquee box drag (Shift + Drag on canvas, or marquee_select mode)
-    const isMarqueeMode = toolMode === 'marquee_select';
-    const isShiftCanvasDrag = e.shiftKey && (toolMode === 'select' || isMarqueeMode);
+    // Space key held OR Middle mouse button (button 1) OR pan tool mode => Pan Infinite Canvas
+    const isPanAction = isSpacePressedRef.current || e.button === 1 || toolMode === 'pan';
 
-    if (isMarqueeMode || isShiftCanvasDrag) {
+    if (isPanAction) {
+      canvasPointerDownRef.current = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+      };
+      hasDraggedCanvasRef.current = false;
+      panStartRef.current = {
+        x: e.clientX - viewTransform.x,
+        y: e.clientY - viewTransform.y,
+      };
+      return;
+    }
+
+    // In 'select' or 'marquee_select' mode with left click:
+    // Initiate marquee box selection on canvas background
+    if ((toolMode === 'select' || toolMode === 'marquee_select') && e.button === 0) {
       const worldPos = screenToWorld(e.clientX, e.clientY, false);
       const isAdditive = e.shiftKey && currentSelectedStationIds.length > 0;
       marqueeRef.current = {
         startWorldX: worldPos.rawX,
         startWorldY: worldPos.rawY,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        hasDragged: false,
         initialSelectedIds: isAdditive ? [...currentSelectedStationIds] : [],
         isAdditive,
       };
-      setMarqueeBox({
-        startX: worldPos.rawX,
-        startY: worldPos.rawY,
-        endX: worldPos.rawX,
-        endY: worldPos.rawY,
-      });
       return;
     }
 
+    // For other modes ('add_station', 'add_virtual_node', 'connect'):
     canvasPointerDownRef.current = {
       clientX: e.clientX,
       clientY: e.clientY,
@@ -1505,9 +1612,13 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   // Dynamic cursor
   const getCursorClass = () => {
     if (isPanning) return 'cursor-grabbing';
+    if (isSpaceDown) return 'cursor-grab';
+    if (marqueeBox) return 'cursor-crosshair';
     if (toolMode === 'add_station' || toolMode === 'add_virtual_node') return 'cursor-crosshair';
+    if (toolMode === 'marquee_select') return 'cursor-crosshair';
     if (toolMode === 'connect') return 'cursor-pointer';
-    return 'cursor-grab';
+    if (toolMode === 'pan') return 'cursor-grab';
+    return 'cursor-default';
   };
 
 
@@ -1630,6 +1741,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       {/* Main SVG Infinite World */}
       <svg
         ref={svgRef}
+        id="metro-canvas-svg"
         className="w-full h-full block"
         style={{ touchAction: 'none' }}
       >
@@ -1747,6 +1859,83 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               </g>
             );
           })}
+
+          {/* Shortest Path Preview Animated Dashed Line Layer */}
+          {showShortestPathPreview && shortestPathResult && shortestPathResult.stationIds.length >= 2 && (
+            <g className="pointer-events-none shortest-path-preview-layer export-ignore">
+              {shortestPathResult.stationIds.slice(0, -1).map((fromId, idx) => {
+                const toId = shortestPathResult.stationIds[idx + 1];
+                const st1 = stations.find((s) => s.id === fromId);
+                const st2 = stations.find((s) => s.id === toId);
+                if (!st1 || !st2) return null;
+
+                const connId = shortestPathResult.connectionIds[idx];
+                const conn = connId ? connections.find((c) => c.id === connId) : undefined;
+
+                let pathD = '';
+                if (conn) {
+                  pathD = getMetroPath(
+                    st1.x,
+                    st1.y,
+                    st2.x,
+                    st2.y,
+                    conn.routeType || '135_bend',
+                    14,
+                    conn.waypoints,
+                    conn.isFlipped,
+                    conn.angleA,
+                    conn.angleB
+                  );
+                } else {
+                  pathD = getMetroPath(st1.x, st1.y, st2.x, st2.y, activeRouteType || '135_bend', 14);
+                }
+
+                return (
+                  <g key={`sp-seg-${fromId}-${toId}-${idx}`}>
+                    {/* Outer broad neon halo glow */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="#06B6D4"
+                      strokeWidth={14}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.35}
+                    />
+                    {/* Secondary crisp cyan glow */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="#38BDF8"
+                      strokeWidth={8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.65}
+                    />
+                    {/* Inner high-contrast animated dashed line with marching ants */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="#FFFFFF"
+                      strokeWidth={3.5}
+                      strokeDasharray="9 7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.98}
+                    >
+                      <animate
+                        attributeName="stroke-dashoffset"
+                        from="32"
+                        to="0"
+                        dur="1.2s"
+                        repeatCount="indefinite"
+                      />
+                    </path>
+                  </g>
+                );
+              })}
+            </g>
+          )}
 
           {/* Waypoint draggable control handles for selected freehand line */}
           {selectedConn && selectedConn.routeType === 'free_curve' && selectedConn.waypoints && (
@@ -2182,6 +2371,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     strokeWidth={2}
                     strokeDasharray="4 3"
                     pointerEvents="none"
+                    className="export-ignore"
                   />
                 )}
 
@@ -2193,6 +2383,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     strokeWidth={2.5}
                     strokeDasharray={isConnectSource ? '4 3' : undefined}
                     pointerEvents="none"
+                    className="export-ignore"
                   />
                 )}
 
@@ -2251,18 +2442,170 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       </g>
                     )}
                   </g>
-                ) : st.type === 'interchange' ? (
-                  <g pointerEvents="none">
-                    <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                    {distinctColors.length >= 2 ? (
-                      <g>
-                        <circle cx={-3.5} cy={0} r={3} fill={distinctColors[0]} />
-                        <circle cx={3.5} cy={0} r={3} fill={distinctColors[1]} />
+                ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
+                  /* Dynamic Unlimited N-Line Interchange Station (無限制多線換乘站) */
+                  (() => {
+                    const PALETTE = [
+                      '#E11D48', '#2563EB', '#16A34A', '#EA580C', '#854D0E',
+                      '#CA8A04', '#9333EA', '#06B6D4', '#EC4899', '#10B981',
+                      '#6366F1', '#F59E0B', '#14B8A6', '#8B5CF6', '#F43F5E'
+                    ];
+
+                    let colors = [...distinctColors];
+                    if (colors.length === 0) {
+                      colors = [primaryColor, '#2563EB'];
+                    } else if (colors.length === 1 && (st.type === 'interchange' || st.type === 'interchange_3line')) {
+                      const fallback = PALETTE.find((c) => c.toUpperCase() !== colors[0].toUpperCase()) || '#2563EB';
+                      colors.push(fallback);
+                    }
+
+                    // If manual lines count is specified or 3-line type selected, pad or trim colors
+                    const targetCount = st.interchangeLinesCount ?? (st.type === 'interchange_3line' ? Math.max(3, colors.length) : colors.length);
+                    if (targetCount > colors.length) {
+                      for (let i = 0; colors.length < targetCount; i++) {
+                        const fallbackColor = PALETTE[i % PALETTE.length];
+                        if (!colors.includes(fallbackColor)) {
+                          colors.push(fallbackColor);
+                        } else {
+                          colors.push(PALETTE[(i + 3) % PALETTE.length]);
+                        }
+                      }
+                    } else if (st.interchangeLinesCount && targetCount < colors.length) {
+                      colors = colors.slice(0, targetCount);
+                    }
+
+                    const N = Math.max(2, colors.length);
+                    const iStyle = st.interchangeStyle || 'dots';
+
+                    // 1. Pie Style (扇形輪盤切分 - 支援任意 N 等分 360° 輪盤)
+                    if (iStyle === 'pie') {
+                      const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
+                      const rPie = rOuter - 4;
+                      const rHub = Math.max(2, 2.8 - N * 0.08);
+
+                      return (
+                        <g pointerEvents="none">
+                          <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                          {colors.map((c, idx) => {
+                            const degStart = -90 + (idx * 360) / N;
+                            const degEnd = -90 + ((idx + 1) * 360) / N;
+                            const radStart = (degStart * Math.PI) / 180;
+                            const radEnd = (degEnd * Math.PI) / 180;
+                            const x1 = Math.round(Math.cos(radStart) * rPie * 100) / 100;
+                            const y1 = Math.round(Math.sin(radStart) * rPie * 100) / 100;
+                            const x2 = Math.round(Math.cos(radEnd) * rPie * 100) / 100;
+                            const y2 = Math.round(Math.sin(radEnd) * rPie * 100) / 100;
+                            const largeArc = 360 / N > 180 ? 1 : 0;
+                            const pathData = `M 0 0 L ${x1} ${y1} A ${rPie} ${rPie} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+                            return (
+                              <g key={idx}>
+                                <path d={pathData} fill={c} />
+                                <line x1={0} y1={0} x2={x1} y2={y1} stroke="#ffffff" strokeWidth={1.2} />
+                              </g>
+                            );
+                          })}
+                          <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
+                        </g>
+                      );
+                    }
+
+                    // 2. Capsule Style (連鎖延伸膠囊 - 支援任意 N 個節點橫向展開)
+                    if (iStyle === 'capsule') {
+                      const nodeSpacing = Math.max(7, Math.min(10, 36 / (N - 1 || 1)));
+                      const halfSpan = ((N - 1) * nodeSpacing) / 2;
+                      const capWidth = halfSpan * 2 + 20;
+                      const capHeight = 18;
+                      const nodeRadius = Math.max(2.8, Math.min(4, 14 / Math.sqrt(N)));
+
+                      return (
+                        <g pointerEvents="none">
+                          <rect
+                            x={-capWidth / 2}
+                            y={-capHeight / 2}
+                            width={capWidth}
+                            height={capHeight}
+                            rx={capHeight / 2}
+                            fill="#ffffff"
+                            stroke="#0f172a"
+                            strokeWidth={3.5}
+                          />
+                          <line
+                            x1={-halfSpan}
+                            y1={0}
+                            x2={halfSpan}
+                            y2={0}
+                            stroke="#0f172a"
+                            strokeWidth={2}
+                          />
+                          {colors.map((c, idx) => {
+                            const cx = -halfSpan + idx * nodeSpacing;
+                            return (
+                              <circle
+                                key={idx}
+                                cx={cx}
+                                cy={0}
+                                r={nodeRadius}
+                                fill={c}
+                                stroke="#ffffff"
+                                strokeWidth={1}
+                              />
+                            );
+                          })}
+                        </g>
+                      );
+                    }
+
+                    // 3. Dots Style (色點陣列 - 2線平行、3線三角、4線以上環狀正多邊形陣列，無限制延伸)
+                    if (N === 2) {
+                      return (
+                        <g pointerEvents="none">
+                          <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                          <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
+                          <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
+                        </g>
+                      );
+                    }
+
+                    if (N === 3) {
+                      return (
+                        <g pointerEvents="none">
+                          <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                          <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
+                          <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
+                          <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
+                          <circle r={1.2} fill="#0f172a" />
+                        </g>
+                      );
+                    }
+
+                    // N >= 4: Regular N-gon Ring Layout
+                    const rHub = Math.max(14, 11 + N * 0.9);
+                    const rOrbit = rHub - 6.5;
+                    const rDot = Math.max(2.2, Math.min(3.2, 22 / N));
+
+                    return (
+                      <g pointerEvents="none">
+                        <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                        {colors.map((c, idx) => {
+                          const deg = -90 + (idx * 360) / N;
+                          const rad = (deg * Math.PI) / 180;
+                          const cx = Math.round(Math.cos(rad) * rOrbit * 100) / 100;
+                          const cy = Math.round(Math.sin(rad) * rOrbit * 100) / 100;
+                          return (
+                            <circle
+                              key={idx}
+                              cx={cx}
+                              cy={cy}
+                              r={rDot}
+                              fill={c}
+                            />
+                          );
+                        })}
+                        <circle r={1.4} fill="#0f172a" />
                       </g>
-                    ) : (
-                      <circle r={5} fill={primaryColor} />
-                    )}
-                  </g>
+                    );
+                  })()
                 ) : st.type === 'terminal' ? (
                   <g pointerEvents="none">
                     <rect
@@ -2395,22 +2738,108 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             );
           })}
 
-          {/* Marquee Selection Rectangle (Shift + Drag) */}
-          {marqueeBox && (
-            <g className="pointer-events-none select-none">
-              <rect
-                x={Math.min(marqueeBox.startX, marqueeBox.endX)}
-                y={Math.min(marqueeBox.startY, marqueeBox.endY)}
-                width={Math.max(Math.abs(marqueeBox.endX - marqueeBox.startX), 1)}
-                height={Math.max(Math.abs(marqueeBox.endY - marqueeBox.startY), 1)}
-                fill="rgba(99, 102, 241, 0.16)"
-                stroke="#6366F1"
-                strokeWidth={1.5 / viewTransform.scale}
-                strokeDasharray={`${6 / viewTransform.scale} ${3 / viewTransform.scale}`}
-                rx={3 / viewTransform.scale}
-              />
+          {/* Shortest Path Sequential Station Markers & Badges */}
+          {showShortestPathPreview && shortestPathResult && shortestPathResult.stationIds.length >= 2 && (
+            <g className="pointer-events-none shortest-path-badges-layer export-ignore">
+              {shortestPathResult.stationIds.map((stId, idx) => {
+                const st = stations.find((s) => s.id === stId);
+                if (!st) return null;
+                const isStart = idx === 0;
+                const isEnd = idx === shortestPathResult.stationIds.length - 1;
+
+                return (
+                  <g
+                    key={`sp-badge-${st.id}`}
+                    transform={`translate(${st.x}, ${st.y})`}
+                    className="pointer-events-none"
+                  >
+                    {/* Glowing highlight ring around station */}
+                    <circle
+                      r={st.isVirtual ? 16 : 22}
+                      fill="none"
+                      stroke={isStart ? '#10B981' : isEnd ? '#F43F5E' : '#38BDF8'}
+                      strokeWidth={2.5}
+                      strokeDasharray={isStart || isEnd ? '4 3' : undefined}
+                      opacity={0.9}
+                      className={isStart || isEnd ? 'animate-spin' : ''}
+                      style={{ animationDuration: '6s' }}
+                    />
+
+                    {/* Sequential badge pin floating above the station */}
+                    <g transform="translate(0, -28)">
+                      <rect
+                        x={isStart ? -26 : isEnd ? -26 : -14}
+                        y={-12}
+                        width={isStart ? 52 : isEnd ? 52 : 28}
+                        height={22}
+                        rx={11}
+                        fill={isStart ? '#065F46' : isEnd ? '#881337' : '#0F172A'}
+                        stroke={isStart ? '#34D399' : isEnd ? '#FB7185' : '#38BDF8'}
+                        strokeWidth={1.8}
+                        filter="drop-shadow(0 2px 4px rgba(0,0,0,0.4))"
+                      />
+                      <text
+                        y={3.5}
+                        textAnchor="middle"
+                        className="font-sans text-[11px] font-extrabold fill-white select-none"
+                      >
+                        {isStart ? '起點' : isEnd ? '終點' : `${idx + 1}`}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })}
             </g>
           )}
+
+          {/* Marquee Selection Rectangle */}
+          {marqueeBox && (() => {
+            const bx = Math.min(marqueeBox.startX, marqueeBox.endX);
+            const by = Math.min(marqueeBox.startY, marqueeBox.endY);
+            const bw = Math.max(Math.abs(marqueeBox.endX - marqueeBox.startX), 1);
+            const bh = Math.max(Math.abs(marqueeBox.endY - marqueeBox.startY), 1);
+            const count = currentSelectedStationIds.length;
+
+            return (
+              <g className="pointer-events-none select-none">
+                <rect
+                  x={bx}
+                  y={by}
+                  width={bw}
+                  height={bh}
+                  fill="rgba(99, 102, 241, 0.15)"
+                  stroke="#6366F1"
+                  strokeWidth={1.5 / viewTransform.scale}
+                  strokeDasharray={`${6 / viewTransform.scale} ${3 / viewTransform.scale}`}
+                  rx={3 / viewTransform.scale}
+                />
+                {bw > 35 && bh > 25 && count > 0 && (
+                  <g transform={`translate(${bx + bw - (66 / viewTransform.scale)}, ${by + bh + (4 / viewTransform.scale)})`}>
+                    <rect
+                      x={0}
+                      y={0}
+                      width={66 / viewTransform.scale}
+                      height={18 / viewTransform.scale}
+                      rx={4 / viewTransform.scale}
+                      fill="#4F46E5"
+                      fillOpacity={0.92}
+                    />
+                    <text
+                      x={33 / viewTransform.scale}
+                      y={12.5 / viewTransform.scale}
+                      textAnchor="middle"
+                      fill="#FFFFFF"
+                      fontSize={10 / viewTransform.scale}
+                      fontWeight="600"
+                      fontFamily="system-ui, -apple-system, sans-serif"
+                    >
+                      {count} 個節點
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })()}
 
         </g>
       </svg>

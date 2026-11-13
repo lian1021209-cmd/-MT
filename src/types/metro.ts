@@ -1,4 +1,6 @@
-export type StationType = 'regular' | 'interchange' | 'terminal';
+export type StationType = 'regular' | 'interchange' | 'interchange_3line' | 'terminal';
+
+export type InterchangeStyle = 'dots' | 'pie' | 'capsule';
 
 export interface Point {
   x: number;
@@ -42,6 +44,8 @@ export interface Station {
   x: number;
   y: number;
   type: StationType;
+  interchangeStyle?: InterchangeStyle; // 換乘站風格：'dots' (色點陣列) | 'pie' (輪盤扇形) | 'capsule' (連鎖膠囊)
+  interchangeLinesCount?: number; // 自訂換乘路線數量 (無限制，留空則自動偵測交會線路數)
   labelPosition?: LabelPosition;
   labelOffset?: Point; // 自由站名拖動時的相對位移 (dx, dy)
   isVirtual?: boolean; // 虛擬節點：非站點，用於線路轉折、分岔與連線
