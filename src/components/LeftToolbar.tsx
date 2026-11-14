@@ -6,8 +6,10 @@ import {
   XCircle,
   GitCommit,
   Pipette,
+  ImagePlus,
+  Type,
 } from 'lucide-react';
-import { ToolMode, RouteType, EffectiveTheme } from '../types/metro';
+import { ToolMode, RouteType, EffectiveTheme, CanvasImage } from '../types/metro';
 import { ROUTE_TYPE_OPTIONS } from './Toolbar';
 
 interface LeftToolbarProps {
@@ -17,6 +19,8 @@ interface LeftToolbarProps {
   onChangeRouteType: (type: RouteType) => void;
   activeColor: string;
   onOpenColorModal: () => void;
+  onAddImage?: (img: Omit<CanvasImage, 'id' | 'x' | 'y'>) => void;
+  onAddText?: () => void;
   theme?: EffectiveTheme;
 }
 
@@ -27,11 +31,14 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   onChangeRouteType,
   activeColor,
   onOpenColorModal,
+  onAddImage,
+  onAddText,
   theme = 'dark',
 }) => {
   const isLight = theme === 'light';
   const [showRouteFlyout, setShowRouteFlyout] = useState(false);
   const flyoutRef = useRef<HTMLDivElement | null>(null);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -47,10 +54,61 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     };
   }, [showRouteFlyout]);
 
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !onAddImage) return;
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'SVG 圖片';
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      const img = new window.Image();
+      img.onload = () => {
+        const natW = img.naturalWidth > 0 ? img.naturalWidth : 200;
+        const natH = img.naturalHeight > 0 ? img.naturalHeight : 200;
+        const maxDim = 260;
+        const ratio = Math.min(1, maxDim / Math.max(natW, natH));
+        const width = Math.max(24, Math.round(natW * ratio));
+        const height = Math.max(24, Math.round(natH * ratio));
+        onAddImage({
+          name: baseName,
+          src: dataUrl,
+          width,
+          height,
+          scale: 1,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+          opacity: 1,
+          zIndex: -1,
+          preserveAspectRatio: true,
+        });
+      };
+      img.onerror = () => {
+        onAddImage({
+          name: baseName,
+          src: dataUrl,
+          width: 200,
+          height: 200,
+          scale: 1,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+          opacity: 1,
+          zIndex: -1,
+          preserveAspectRatio: true,
+        });
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const activeOption = ROUTE_TYPE_OPTIONS.find((o) => o.type === activeRouteType) || ROUTE_TYPE_OPTIONS[0];
 
   const getToolButtonClass = (active: boolean) =>
-    `w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+    `w-12 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
       active
         ? isLight
           ? 'bg-zinc-900 text-white'
@@ -63,12 +121,21 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   return (
     <aside
       aria-label="工具列"
-      className={`relative w-14 border-r flex flex-col items-center py-3 px-1.5 select-none shrink-0 h-full z-20 transition-colors ${
+      className={`relative w-14 border-r flex flex-col items-center py-2.5 px-1 select-none shrink-0 h-full z-20 transition-colors ${
         isLight ? 'bg-white border-zinc-200' : 'bg-[#111113] border-zinc-800'
       }`}
     >
+      {/* Hidden file input for SVG Image import */}
+      <input
+        ref={imageFileInputRef}
+        type="file"
+        accept="image/*,.svg"
+        className="hidden"
+        onChange={handleImageFileSelect}
+      />
+
       {/* Drawing Mode Tools */}
-      <div className="flex flex-col items-center gap-1.5 w-full">
+      <div className="flex flex-col items-center gap-1 w-full">
         <button
           type="button"
           onClick={() => {
@@ -197,7 +264,39 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
       </div>
 
       {/* Divider */}
-      <div className={`w-7 h-px my-3 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+      <div className={`w-7 h-px my-2.5 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+
+      {/* SVG Elements: 導入圖片 & 增加文字 */}
+      <div className="flex flex-col items-center gap-1 w-full">
+        <button
+          type="button"
+          onClick={() => {
+            setShowRouteFlyout(false);
+            imageFileInputRef.current?.click();
+          }}
+          className={getToolButtonClass(false)}
+          title="導入圖片 — 從本機上傳 PNG / JPG / SVG 作為畫布 SVG 圖層"
+        >
+          <ImagePlus className="w-4 h-4" />
+          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap">導入圖片</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowRouteFlyout(false);
+            onAddText?.();
+          }}
+          className={getToolButtonClass(false)}
+          title="增加文字 — 在畫布中心建立可自由變換的 SVG 文字"
+        >
+          <Type className="w-4 h-4" />
+          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap">增加文字</span>
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className={`w-7 h-px my-2.5 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
 
       {/* Active Color Swatch */}
       <div className="flex flex-col items-center gap-1.5 w-full">

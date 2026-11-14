@@ -16,7 +16,7 @@ import {
 interface ZOrderControlProps {
   value: number;
   onChange: (nextZ: number) => void;
-  targetType: 'station' | 'connection';
+  targetType: 'station' | 'connection' | 'image' | 'text';
   theme?: EffectiveTheme;
 }
 
@@ -163,6 +163,10 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
       <p className={`text-[11px] leading-relaxed ${textMuted} border-t pt-2 ${borderCol}`}>
         {targetType === 'connection'
           ? '調整線段在畫布的前後順序（+10 最上層，-10 最底層）。'
+          : targetType === 'image'
+          ? '調整圖片在畫布的前後順序（+10 最上層，-10 最底層）。'
+          : targetType === 'text'
+          ? '調整文字在畫布的前後順序（+10 最上層，-10 最底層）。'
           : '調整站點與標籤的前後重疊順序（+10 最上層，-10 最底層）。'}
       </p>
     </div>

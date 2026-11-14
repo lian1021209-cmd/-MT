@@ -5,7 +5,7 @@
 
 import { jsPDF } from 'jspdf';
 import { svg2pdf } from 'svg2pdf.js';
-import { Station, Connection, EffectiveTheme } from '../types/metro';
+import { Station, Connection, CanvasImage, CanvasText, EffectiveTheme } from '../types/metro';
 
 export interface ExportPdfOptions {
   scope?: 'full' | 'viewport';
@@ -14,6 +14,8 @@ export interface ExportPdfOptions {
   orientation?: 'auto' | 'landscape' | 'portrait';
   filename?: string;
   theme?: EffectiveTheme;
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
 }
 
 export interface ExportPdfResult {
@@ -31,7 +33,9 @@ export function prepareSvgForExport(
   svgElement: SVGSVGElement,
   stations: Station[] = [],
   connections: Connection[] = [],
-  scope: 'full' | 'viewport' = 'full'
+  scope: 'full' | 'viewport' = 'full',
+  svgImages: CanvasImage[] = [],
+  svgTexts: CanvasText[] = []
 ): { clone: SVGSVGElement; width: number; height: number; viewBox: string } {
   // 1. Deep clone the SVG element
   const clone = svgElement.cloneNode(true) as SVGSVGElement;
@@ -42,8 +46,8 @@ export function prepareSvgForExport(
   );
   ignoredElements.forEach((el) => el.remove());
 
-  const transparentCircles = clone.querySelectorAll('circle[fill="transparent"]');
-  transparentCircles.forEach((el) => el.remove());
+  const transparentHitAreas = clone.querySelectorAll('circle[fill="transparent"], rect[fill="transparent"]');
+  transparentHitAreas.forEach((el) => el.remove());
 
   // 3. Inject embedded fonts & CSS
   let defs = clone.querySelector('defs');
@@ -92,7 +96,7 @@ export function prepareSvgForExport(
 
   let viewBoxStr = '';
 
-  if (scope === 'full' && stations.length > 0) {
+  if (scope === 'full' && (stations.length > 0 || svgImages.length > 0 || svgTexts.length > 0)) {
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -120,6 +124,35 @@ export function prepareSvgForExport(
         minY = Math.min(minY, st.y - 25 * lblScale);
         maxY = Math.max(maxY, st.y + 25 * lblScale);
       }
+    });
+
+    svgImages.forEach((img) => {
+      const s = img.scale ?? 1;
+      const sx = s * (img.scaleX ?? 1);
+      const sy = s * (img.scaleY ?? 1);
+      const hw = (img.width * sx) / 2;
+      const hh = (img.height * sy) / 2;
+      const rad = ((img.rotation ?? 0) * Math.PI) / 180;
+      const boundHalfW = Math.abs(hw * Math.cos(rad)) + Math.abs(hh * Math.sin(rad));
+      const boundHalfH = Math.abs(hw * Math.sin(rad)) + Math.abs(hh * Math.cos(rad));
+      minX = Math.min(minX, img.x - boundHalfW);
+      maxX = Math.max(maxX, img.x + boundHalfW);
+      minY = Math.min(minY, img.y - boundHalfH);
+      maxY = Math.max(maxY, img.y + boundHalfH);
+    });
+
+    svgTexts.forEach((txt) => {
+      const s = txt.scale ?? 1;
+      const sx = s * (txt.scaleX ?? 1);
+      const sy = s * (txt.scaleY ?? 1);
+      const lines = (txt.content || '文字').split('\n');
+      const maxChars = Math.max(...lines.map((l) => l.length), 2);
+      const estW = maxChars * txt.fontSize * 0.85 * sx;
+      const estH = lines.length * txt.fontSize * 1.3 * sy;
+      minX = Math.min(minX, txt.x - estW / 2 - 20);
+      maxX = Math.max(maxX, txt.x + estW / 2 + 20);
+      minY = Math.min(minY, txt.y - estH / 2 - 15);
+      maxY = Math.max(maxY, txt.y + estH / 2 + 15);
     });
 
     connections.forEach((conn) => {
@@ -196,6 +229,8 @@ export async function exportMetroCanvasToPdf(
     pageSize = 'fit',
     orientation: userOrientation = 'auto',
     theme = 'dark',
+    svgImages = [],
+    svgTexts = [],
   } = options;
 
   const isLight = theme === 'light';
@@ -205,7 +240,9 @@ export async function exportMetroCanvasToPdf(
     svgElement,
     stations,
     connections,
-    scope
+    scope,
+    svgImages,
+    svgTexts
   );
 
   // 2. Temporarily mount cloned SVG to DOM for svg2pdf to calculate accurate bounding boxes & styles

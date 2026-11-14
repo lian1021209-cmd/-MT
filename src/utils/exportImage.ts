@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Station, Connection, EffectiveTheme } from '../types/metro';
+import { Station, Connection, CanvasImage, CanvasText, EffectiveTheme } from '../types/metro';
 
 export interface ExportPngOptions {
   scope?: 'full' | 'viewport';
@@ -11,6 +11,8 @@ export interface ExportPngOptions {
   scale?: number; // e.g. 1, 2 (Retina/HD), 3
   filename?: string;
   theme?: EffectiveTheme;
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
 }
 
 export interface ExportResult {
@@ -35,6 +37,8 @@ export async function exportMetroCanvasToPng(
     background = 'theme',
     scale = 2,
     theme = 'dark',
+    svgImages = [],
+    svgTexts = [],
   } = options;
 
   const isLight = theme === 'light';
@@ -46,9 +50,9 @@ export async function exportMetroCanvasToPng(
   const ignoredElements = clone.querySelectorAll('.export-ignore, .animate-pulse, [data-export-ignore="true"]');
   ignoredElements.forEach((el) => el.remove());
 
-  // Also remove pointer event helpers or hit area circles that have fill="transparent"
-  const transparentCircles = clone.querySelectorAll('circle[fill="transparent"]');
-  transparentCircles.forEach((el) => el.remove());
+  // Also remove pointer event helpers or hit areas that have fill="transparent"
+  const transparentHitAreas = clone.querySelectorAll('circle[fill="transparent"], rect[fill="transparent"]');
+  transparentHitAreas.forEach((el) => el.remove());
 
   // 3. Inject embedded CSS rules into SVG defs so text & colors render cleanly in isolated Image context
   let defs = clone.querySelector('defs');
@@ -110,8 +114,8 @@ export async function exportMetroCanvasToPng(
   const viewportWidth = rect.width > 0 ? rect.width : 1280;
   const viewportHeight = rect.height > 0 ? rect.height : 800;
 
-  if (scope === 'full' && stations.length > 0) {
-    // Calculate bounding box of all stations + waypoints
+  if (scope === 'full' && (stations.length > 0 || svgImages.length > 0 || svgTexts.length > 0)) {
+    // Calculate bounding box of all stations, waypoints, images, and texts
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -140,6 +144,35 @@ export async function exportMetroCanvasToPng(
         minY = Math.min(minY, st.y - 25 * lblScale);
         maxY = Math.max(maxY, st.y + 25 * lblScale);
       }
+    });
+
+    svgImages.forEach((img) => {
+      const s = img.scale ?? 1;
+      const sx = s * (img.scaleX ?? 1);
+      const sy = s * (img.scaleY ?? 1);
+      const hw = (img.width * sx) / 2;
+      const hh = (img.height * sy) / 2;
+      const rad = ((img.rotation ?? 0) * Math.PI) / 180;
+      const boundHalfW = Math.abs(hw * Math.cos(rad)) + Math.abs(hh * Math.sin(rad));
+      const boundHalfH = Math.abs(hw * Math.sin(rad)) + Math.abs(hh * Math.cos(rad));
+      minX = Math.min(minX, img.x - boundHalfW);
+      maxX = Math.max(maxX, img.x + boundHalfW);
+      minY = Math.min(minY, img.y - boundHalfH);
+      maxY = Math.max(maxY, img.y + boundHalfH);
+    });
+
+    svgTexts.forEach((txt) => {
+      const s = txt.scale ?? 1;
+      const sx = s * (txt.scaleX ?? 1);
+      const sy = s * (txt.scaleY ?? 1);
+      const lines = (txt.content || '文字').split('\n');
+      const maxChars = Math.max(...lines.map((l) => l.length), 2);
+      const estW = maxChars * txt.fontSize * 0.85 * sx;
+      const estH = lines.length * txt.fontSize * 1.3 * sy;
+      minX = Math.min(minX, txt.x - estW / 2 - 20);
+      maxX = Math.max(maxX, txt.x + estW / 2 + 20);
+      minY = Math.min(minY, txt.y - estH / 2 - 15);
+      maxY = Math.max(maxY, txt.y + estH / 2 + 15);
     });
 
     // Also include connection waypoints, parallel line offsets, and custom stroke width

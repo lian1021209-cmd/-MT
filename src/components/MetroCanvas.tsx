@@ -3,6 +3,8 @@ import {
   Station, 
   MetroLine, 
   Connection, 
+  CanvasImage,
+  CanvasText,
   ToolMode, 
   RouteType, 
   Point, 
@@ -64,12 +66,16 @@ interface MetroCanvasProps {
   stations: Station[];
   lines: MetroLine[];
   connections: Connection[];
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
   activeColor: string;
   toolMode: ToolMode;
   onSetToolMode: (mode: ToolMode) => void;
   selectedStationId: string | null;
   selectedStationIds?: string[];
   selectedConnectionId: string | null;
+  selectedImageId?: string | null;
+  selectedTextId?: string | null;
   gridSnap: boolean;
   gridSize: number;
   nodeAlign?: boolean;
@@ -77,12 +83,16 @@ interface MetroCanvasProps {
   onSelectStation: (id: string | null) => void;
   onSelectStationIds?: (ids: string[]) => void;
   onSelectConnection: (id: string | null) => void;
+  onSelectImage?: (id: string | null) => void;
+  onSelectText?: (id: string | null) => void;
   onAddStation: (station: Station) => void;
   onUpdateStationPos: (id: string, x: number, y: number) => void;
   onUpdateStationsPos?: (updates: { id: string; x: number; y: number }[]) => void;
   onBatchUpdateStations?: (updates: Array<{ id: string } & Partial<Station>>) => void;
   onBatchDeleteStations?: (ids: string[]) => void;
   onUpdateStation?: (updated: Station) => void;
+  onUpdateImage?: (updated: CanvasImage) => void;
+  onUpdateText?: (updated: CanvasText) => void;
   onAddConnection: (
     fromId: string, 
     toId: string, 
@@ -94,8 +104,11 @@ interface MetroCanvasProps {
   onUpdateStationZIndex?: (stationId: string, zIndex: number) => void;
   onBatchUpdateStationsZIndex?: (stationIds: string[], delta: number) => void;
   onUpdateConnectionZIndex?: (connId: string, zIndex: number) => void;
+  onUpdateImageZIndex?: (imageId: string, zIndex: number) => void;
+  onUpdateTextZIndex?: (textId: string, zIndex: number) => void;
   onUpdateConnectionOffset?: (connId: string, offset: number) => void;
   onUpdateConnectionStyle?: (connId: string, patch: Partial<Connection>) => void;
+  onViewportCenterChange?: (center: Point) => void;
   onDeleteSelected: () => void;
   onRecordHistory?: () => void;
   theme?: EffectiveTheme;
@@ -107,12 +120,16 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   stations,
   lines: _lines,
   connections,
+  svgImages = [],
+  svgTexts = [],
   activeColor,
   toolMode,
   onSetToolMode,
   selectedStationId,
   selectedStationIds = [],
   selectedConnectionId,
+  selectedImageId = null,
+  selectedTextId = null,
   gridSnap,
   gridSize,
   nodeAlign,
@@ -120,19 +137,26 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   onSelectStation,
   onSelectStationIds,
   onSelectConnection,
+  onSelectImage,
+  onSelectText,
   onAddStation,
   onUpdateStationPos,
   onUpdateStationsPos,
   onBatchUpdateStations,
   onBatchDeleteStations,
   onUpdateStation,
+  onUpdateImage,
+  onUpdateText,
   onAddConnection,
   onUpdateConnectionWaypoints,
   onUpdateStationZIndex,
   onBatchUpdateStationsZIndex,
   onUpdateConnectionZIndex,
+  onUpdateImageZIndex,
+  onUpdateTextZIndex,
   onUpdateConnectionOffset,
   onUpdateConnectionStyle,
+  onViewportCenterChange,
   onDeleteSelected,
   onRecordHistory,
   theme = 'dark',
@@ -266,6 +290,68 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   const [transformHudText, setTransformHudText] = useState<string | null>(null);
 
+  // SVG Image & Text drag + Stage 3 Free Transform tracking
+  const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
+  const imageDragRef = useRef<{
+    imageId: string;
+    startWorldX: number;
+    startWorldY: number;
+    origX: number;
+    origY: number;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  const [draggingTextId, setDraggingTextId] = useState<string | null>(null);
+  const textDragRef = useRef<{
+    textId: string;
+    startWorldX: number;
+    startWorldY: number;
+    origX: number;
+    origY: number;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  const imageTransformRef = useRef<{
+    imageId: string;
+    handle: TransformHandleKind;
+    centerX: number;
+    centerY: number;
+    baseHalfW: number;
+    baseHalfH: number;
+    startDist: number;
+    startAngle: number;
+    origScale: number;
+    origScaleX: number;
+    origScaleY: number;
+    origRotation: number;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  const textTransformRef = useRef<{
+    textId: string;
+    handle: TransformHandleKind;
+    centerX: number;
+    centerY: number;
+    baseHalfW: number;
+    baseHalfH: number;
+    startDist: number;
+    startAngle: number;
+    origScale: number;
+    origScaleX: number;
+    origScaleY: number;
+    origRotation: number;
+    hasRecordedHistory?: boolean;
+  } | null>(null);
+
+  // Sync viewport center coordinates for newly imported images / added text
+  useEffect(() => {
+    if (!onViewportCenterChange || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const cx = Math.round((rect.width / 2 - viewTransform.x) / viewTransform.scale);
+    const cy = Math.round((rect.height / 2 - viewTransform.y) / viewTransform.scale);
+    onViewportCenterChange({ x: cx, y: cy });
+  }, [viewTransform, onViewportCenterChange]);
+
   // Multi-touch tracking for pinch-to-zoom & two-finger pan on mobile/tablet
   const touchPointsRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
   const pinchStartRef = useRef<{
@@ -359,6 +445,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         onSelectStation(null);
         onSelectStationIds?.([]);
         onSelectConnection(null);
+        onSelectImage?.(null);
+        onSelectText?.(null);
         onSetToolMode('select');
       } else if (e.key === 'v' || e.key === 'V') {
         onSetToolMode('select');
@@ -373,7 +461,27 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       } else if (e.key === '[' || e.key === '{' || e.key === ']' || e.key === '}') {
         const isUp = e.key === ']' || e.key === '}';
         const toExtreme = e.shiftKey || e.key === '{' || e.key === '}';
-        if (selectedConnectionId && onUpdateConnectionZIndex) {
+        if (selectedImageId && onUpdateImageZIndex) {
+          const img = svgImages.find((i) => i.id === selectedImageId);
+          if (img) {
+            e.preventDefault();
+            const cur = img.zIndex ?? -1;
+            const next = toExtreme
+              ? (isUp ? MAX_Z_ORDER : MIN_Z_ORDER)
+              : clampZOrder(cur + (isUp ? 1 : -1));
+            onUpdateImageZIndex(img.id, next);
+          }
+        } else if (selectedTextId && onUpdateTextZIndex) {
+          const txt = svgTexts.find((t) => t.id === selectedTextId);
+          if (txt) {
+            e.preventDefault();
+            const cur = txt.zIndex ?? 1;
+            const next = toExtreme
+              ? (isUp ? MAX_Z_ORDER : MIN_Z_ORDER)
+              : clampZOrder(cur + (isUp ? 1 : -1));
+            onUpdateTextZIndex(txt.id, next);
+          }
+        } else if (selectedConnectionId && onUpdateConnectionZIndex) {
           const conn = connections.find((c) => c.id === selectedConnectionId);
           if (conn) {
             e.preventDefault();
@@ -409,15 +517,23 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     onSelectStation,
     onSelectStationIds,
     onSelectConnection,
+    onSelectImage,
+    onSelectText,
     onSetToolMode,
     selectedConnectionId,
     selectedStationId,
+    selectedImageId,
+    selectedTextId,
     currentSelectedStationIds,
     connections,
     stations,
+    svgImages,
+    svgTexts,
     onUpdateConnectionZIndex,
     onUpdateStationZIndex,
     onBatchUpdateStationsZIndex,
+    onUpdateImageZIndex,
+    onUpdateTextZIndex,
   ]);
 
   // Batch alignment tools for selected stations
@@ -525,9 +641,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     });
   };
 
-  // Fit all stations into view
+  // Fit all stations, images, and texts into view
   const handleFitView = () => {
-    if (!containerRef.current || stations.length === 0) {
+    if (
+      !containerRef.current ||
+      (stations.length === 0 && svgImages.length === 0 && svgTexts.length === 0)
+    ) {
       handleResetToOrigin();
       return;
     }
@@ -543,6 +662,22 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       maxX = Math.max(maxX, st.x);
       minY = Math.min(minY, st.y);
       maxY = Math.max(maxY, st.y);
+    });
+
+    svgImages.forEach((img) => {
+      const hw = (img.width * (img.scale ?? 1) * (img.scaleX ?? 1)) / 2;
+      const hh = (img.height * (img.scale ?? 1) * (img.scaleY ?? 1)) / 2;
+      minX = Math.min(minX, img.x - hw);
+      maxX = Math.max(maxX, img.x + hw);
+      minY = Math.min(minY, img.y - hh);
+      maxY = Math.max(maxY, img.y + hh);
+    });
+
+    svgTexts.forEach((txt) => {
+      minX = Math.min(minX, txt.x - 60);
+      maxX = Math.max(maxX, txt.x + 60);
+      minY = Math.min(minY, txt.y - 30);
+      maxY = Math.max(maxY, txt.y + 30);
     });
 
     const padding = 100;
@@ -599,6 +734,184 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           }
           return;
         }
+      }
+
+      // Stage 3: SVG Image Free Transform Drag
+      if (imageTransformRef.current) {
+        const info = imageTransformRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const dx = curWorld.rawX - info.centerX;
+        const dy = curWorld.rawY - info.centerY;
+
+        if (!info.hasRecordedHistory) {
+          info.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        const img = svgImages.find((i) => i.id === info.imageId);
+        if (img && onUpdateImage) {
+          if (info.handle === 'rotate') {
+            const curAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+            let nextRot = info.origRotation + (curAngle - info.startAngle);
+            if (e.shiftKey) {
+              nextRot = Math.round(nextRot / 15) * 15;
+            }
+            const normalizedRot = normalizeSvgAngle(nextRot);
+            onUpdateImage({ ...img, rotation: normalizedRot });
+            setTransformHudText(`旋轉 ${normalizedRot}°`);
+          } else {
+            const rad = -(info.origRotation * Math.PI) / 180;
+            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+            if (info.handle === 'e' || info.handle === 'w') {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
+                0.08
+              );
+              onUpdateImage({ ...img, scaleX: nextScaleX });
+              setTransformHudText(`水平 ${nextScaleX}×`);
+            } else if (info.handle === 'n' || info.handle === 's') {
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
+                0.08
+              );
+              onUpdateImage({ ...img, scaleY: nextScaleY });
+              setTransformHudText(`垂直 ${nextScaleY}×`);
+            } else if (e.shiftKey) {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
+                0.08
+              );
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
+                0.08
+              );
+              onUpdateImage({ ...img, scaleX: nextScaleX, scaleY: nextScaleY });
+              setTransformHudText(`${nextScaleX}× · ${nextScaleY}×`);
+            } else {
+              const curDist = Math.max(8, Math.hypot(dx, dy));
+              const nextScale = normalizeSvgScale(
+                info.origScale * (curDist / Math.max(8, info.startDist)),
+                0.08
+              );
+              onUpdateImage({ ...img, scale: nextScale });
+              setTransformHudText(`縮放 ${nextScale}×`);
+            }
+          }
+        }
+        return;
+      }
+
+      // Stage 3: SVG Text Free Transform Drag
+      if (textTransformRef.current) {
+        const info = textTransformRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const dx = curWorld.rawX - info.centerX;
+        const dy = curWorld.rawY - info.centerY;
+
+        if (!info.hasRecordedHistory) {
+          info.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        const txt = svgTexts.find((t) => t.id === info.textId);
+        if (txt && onUpdateText) {
+          if (info.handle === 'rotate') {
+            const curAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+            let nextRot = info.origRotation + (curAngle - info.startAngle);
+            if (e.shiftKey) {
+              nextRot = Math.round(nextRot / 15) * 15;
+            }
+            const normalizedRot = normalizeSvgAngle(nextRot);
+            onUpdateText({ ...txt, rotation: normalizedRot });
+            setTransformHudText(`旋轉 ${normalizedRot}°`);
+          } else {
+            const rad = -(info.origRotation * Math.PI) / 180;
+            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+            if (info.handle === 'e' || info.handle === 'w') {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
+                0.15
+              );
+              onUpdateText({ ...txt, scaleX: nextScaleX });
+              setTransformHudText(`水平 ${nextScaleX}×`);
+            } else if (info.handle === 'n' || info.handle === 's') {
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
+                0.15
+              );
+              onUpdateText({ ...txt, scaleY: nextScaleY });
+              setTransformHudText(`垂直 ${nextScaleY}×`);
+            } else if (e.shiftKey) {
+              const nextScaleX = normalizeSvgScale(
+                Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
+                0.15
+              );
+              const nextScaleY = normalizeSvgScale(
+                Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
+                0.15
+              );
+              onUpdateText({ ...txt, scaleX: nextScaleX, scaleY: nextScaleY });
+              setTransformHudText(`${nextScaleX}× · ${nextScaleY}×`);
+            } else {
+              const curDist = Math.max(8, Math.hypot(dx, dy));
+              const nextScale = normalizeSvgScale(
+                info.origScale * (curDist / Math.max(8, info.startDist)),
+                0.15
+              );
+              onUpdateText({ ...txt, scale: nextScale });
+              setTransformHudText(`縮放 ${nextScale}×`);
+            }
+          }
+        }
+        return;
+      }
+
+      // SVG Image Dragging
+      if (imageDragRef.current) {
+        const { imageId, startWorldX, startWorldY, origX, origY } = imageDragRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const deltaX = curWorld.rawX - startWorldX;
+        const deltaY = curWorld.rawY - startWorldY;
+
+        if (!imageDragRef.current.hasRecordedHistory && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+          imageDragRef.current.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        const img = svgImages.find((i) => i.id === imageId);
+        if (img && onUpdateImage) {
+          const isCtrlActive = e.ctrlKey || e.metaKey || isCtrlPressedRef.current;
+          const nextX = gridSnap && !isCtrlActive ? snapToGrid(origX + deltaX, gridSize) : Math.round(origX + deltaX);
+          const nextY = gridSnap && !isCtrlActive ? snapToGrid(origY + deltaY, gridSize) : Math.round(origY + deltaY);
+          onUpdateImage({ ...img, x: nextX, y: nextY });
+        }
+        return;
+      }
+
+      // SVG Text Dragging
+      if (textDragRef.current) {
+        const { textId, startWorldX, startWorldY, origX, origY } = textDragRef.current;
+        const curWorld = screenToWorld(e.clientX, e.clientY, false);
+        const deltaX = curWorld.rawX - startWorldX;
+        const deltaY = curWorld.rawY - startWorldY;
+
+        if (!textDragRef.current.hasRecordedHistory && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+          textDragRef.current.hasRecordedHistory = true;
+          onRecordHistory?.();
+        }
+
+        const txt = svgTexts.find((t) => t.id === textId);
+        if (txt && onUpdateText) {
+          const isCtrlActive = e.ctrlKey || e.metaKey || isCtrlPressedRef.current;
+          const nextX = gridSnap && !isCtrlActive ? snapToGrid(origX + deltaX, gridSize) : Math.round(origX + deltaX);
+          const nextY = gridSnap && !isCtrlActive ? snapToGrid(origY + deltaY, gridSize) : Math.round(origY + deltaY);
+          onUpdateText({ ...txt, x: nextX, y: nextY });
+        }
+        return;
       }
 
       // Stage 3: Single Station Free SVG Transform Drag
@@ -1333,6 +1646,16 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       }
 
       // Release Stage 3 free transforms
+      if (imageTransformRef.current) {
+        imageTransformRef.current = null;
+        setTransformHudText(null);
+        return;
+      }
+      if (textTransformRef.current) {
+        textTransformRef.current = null;
+        setTransformHudText(null);
+        return;
+      }
       if (stationTransformRef.current) {
         stationTransformRef.current = null;
         setTransformHudText(null);
@@ -1342,6 +1665,16 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         groupTransformRef.current = null;
         setTransformHudText(null);
         return;
+      }
+
+      // Release SVG image / text drag
+      if (imageDragRef.current) {
+        imageDragRef.current = null;
+        setDraggingImageId(null);
+      }
+      if (textDragRef.current) {
+        textDragRef.current = null;
+        setDraggingTextId(null);
       }
 
       // Release station label drag
@@ -1472,6 +1805,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             onSelectStation(null);
             onSelectStationIds?.([]);
             onSelectConnection(null);
+            onSelectImage?.(null);
+            onSelectText?.(null);
           }
         }
 
@@ -1483,6 +1818,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       pinchStartRef.current = null;
       labelDragRef.current = null;
       setDraggingLabelStationId(null);
+      imageDragRef.current = null;
+      setDraggingImageId(null);
+      textDragRef.current = null;
+      setDraggingTextId(null);
+      imageTransformRef.current = null;
+      textTransformRef.current = null;
       waypointDragRef.current = null;
       setDraggingWaypointInfo(null);
       dragInfoRef.current = null;
@@ -1522,7 +1863,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     onAddStation, 
     onSelectStation, 
     onSelectStationIds,
-    onSelectConnection, 
+    onSelectConnection,
+    onSelectImage,
+    onSelectText,
     onUpdateConnectionWaypoints,
     onSetToolMode,
     onAddConnection,
@@ -1535,7 +1878,11 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     connectSourceStationId,
     connections,
     stations,
+    svgImages,
+    svgTexts,
     onUpdateStation,
+    onUpdateImage,
+    onUpdateText,
     onRecordHistory,
     viewTransform.scale
   ]);
@@ -1554,6 +1901,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         setIsPanning(false);
         dragInfoRef.current = null;
         setDraggingStationId(null);
+        imageDragRef.current = null;
+        setDraggingImageId(null);
+        textDragRef.current = null;
+        setDraggingTextId(null);
         waypointDragRef.current = null;
         setDraggingWaypointInfo(null);
         labelDragRef.current = null;
@@ -1685,6 +2036,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
     onSelectStation(station.id);
     onSelectConnection(null);
+    onSelectImage?.(null);
+    onSelectText?.(null);
 
     let curDx = 0;
     let curDy = -18;
@@ -1707,6 +2060,70 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       startClientY: e.clientY,
       origDx: curDx,
       origDy: curDy,
+    };
+  };
+
+  // SVG Image Pointer Down: select & drag
+  const handleImagePointerDown = (e: React.PointerEvent, img: CanvasImage) => {
+    if (toolMode === 'connect' || toolMode === 'add_station' || toolMode === 'add_virtual_node' || toolMode === 'pan') {
+      return;
+    }
+    e.stopPropagation();
+    if (e.pointerType === 'touch') {
+      touchPointsRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+      if (touchPointsRef.current.size >= 2) return;
+    }
+
+    canvasPointerDownRef.current = null;
+    hasDraggedCanvasRef.current = false;
+    setIsPanning(false);
+
+    onSelectStation(null);
+    onSelectStationIds?.([]);
+    onSelectConnection(null);
+    onSelectText?.(null);
+    onSelectImage?.(img.id);
+
+    const worldPos = screenToWorld(e.clientX, e.clientY, false);
+    setDraggingImageId(img.id);
+    imageDragRef.current = {
+      imageId: img.id,
+      startWorldX: worldPos.rawX,
+      startWorldY: worldPos.rawY,
+      origX: img.x,
+      origY: img.y,
+    };
+  };
+
+  // SVG Text Pointer Down: select & drag
+  const handleTextPointerDown = (e: React.PointerEvent, txt: CanvasText) => {
+    if (toolMode === 'connect' || toolMode === 'add_station' || toolMode === 'add_virtual_node' || toolMode === 'pan') {
+      return;
+    }
+    e.stopPropagation();
+    if (e.pointerType === 'touch') {
+      touchPointsRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+      if (touchPointsRef.current.size >= 2) return;
+    }
+
+    canvasPointerDownRef.current = null;
+    hasDraggedCanvasRef.current = false;
+    setIsPanning(false);
+
+    onSelectStation(null);
+    onSelectStationIds?.([]);
+    onSelectConnection(null);
+    onSelectImage?.(null);
+    onSelectText?.(txt.id);
+
+    const worldPos = screenToWorld(e.clientX, e.clientY, false);
+    setDraggingTextId(txt.id);
+    textDragRef.current = {
+      textId: txt.id,
+      startWorldX: worldPos.rawX,
+      startWorldY: worldPos.rawY,
+      origX: txt.x,
+      origY: txt.y,
     };
   };
 
@@ -1737,6 +2154,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     }
 
     onSelectConnection(null);
+    onSelectImage?.(null);
+    onSelectText?.(null);
 
     let nextBatchIds: string[];
     if (e.shiftKey) {
@@ -1871,17 +2290,68 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     currentSelectedStationIds.length <= 1 && selectedStationId
       ? stations.find((s) => s.id === selectedStationId) || null
       : null;
+  const selectedImage = selectedImageId ? svgImages.find((i) => i.id === selectedImageId) || null : null;
+  const selectedText = selectedTextId ? svgTexts.find((t) => t.id === selectedTextId) || null : null;
 
-  // Sort SVG connections and stations by zIndex (-10 ~ 10, default 0) so higher zIndex renders on top
-  const sortedConnections = React.useMemo(
-    () => [...connections].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)),
-    [connections]
-  );
+  const getTextBoxDimensions = (txt: CanvasText) => {
+    const lines = (txt.content || '文字').split('\n');
+    const maxUnits = Math.max(
+      ...lines.map((line) => {
+        let u = 0;
+        for (const ch of line) {
+          u += ch.charCodeAt(0) > 255 ? 1 : 0.6;
+        }
+        return u;
+      }),
+      1.5
+    );
+    const spacing = txt.letterSpacing ?? 0;
+    const maxChars = Math.max(...lines.map((l) => l.length), 1);
+    const baseW = Math.max(36, maxUnits * txt.fontSize + Math.max(0, maxChars - 1) * spacing + 16);
+    const lineHeight = txt.fontSize * 1.28;
+    const baseH = Math.max(24, lines.length * lineHeight + 10);
+    return { baseW, baseH, lines, lineHeight };
+  };
 
-  const sortedStations = React.useMemo(
-    () => [...stations].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)),
-    [stations]
-  );
+  // Unified SVG render list sorted by zIndex (-10 ~ 10) across Images, Connections, Stations, and Texts
+  type RenderLayerItem =
+    | { kind: 'image'; zIndex: number; kindOrder: 0; item: CanvasImage }
+    | { kind: 'connection'; zIndex: number; kindOrder: 1; item: Connection }
+    | { kind: 'station'; zIndex: number; kindOrder: 2; item: Station }
+    | { kind: 'text'; zIndex: number; kindOrder: 3; item: CanvasText };
+
+  const sortedRenderItems = React.useMemo(() => {
+    const list: RenderLayerItem[] = [
+      ...svgImages.map((item) => ({
+        kind: 'image' as const,
+        zIndex: item.zIndex ?? -1,
+        kindOrder: 0 as const,
+        item,
+      })),
+      ...connections.map((item) => ({
+        kind: 'connection' as const,
+        zIndex: item.zIndex ?? 0,
+        kindOrder: 1 as const,
+        item,
+      })),
+      ...stations.map((item) => ({
+        kind: 'station' as const,
+        zIndex: item.zIndex ?? 0,
+        kindOrder: 2 as const,
+        item,
+      })),
+      ...svgTexts.map((item) => ({
+        kind: 'text' as const,
+        zIndex: item.zIndex ?? 1,
+        kindOrder: 3 as const,
+        item,
+      })),
+    ];
+    return list.sort((a, b) => {
+      if (a.zIndex !== b.zIndex) return a.zIndex - b.zIndex;
+      return a.kindOrder - b.kindOrder;
+    });
+  }, [svgImages, connections, stations, svgTexts]);
 
   const hasActiveNetworkPath = Boolean(
     showShortestPathPreview &&
@@ -2063,115 +2533,692 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             </text>
           </g>
 
-          {/* Render Connections sorted by SVG zIndex (-10 ~ 10) */}
-          {sortedConnections.map((conn) => {
-            const fromSt = stations.find((s) => s.id === conn.fromStationId);
-            const toSt = stations.find((s) => s.id === conn.toStationId);
-            if (!fromSt || !toSt) return null;
+          {/* Unified SVG Render Loop sorted by zIndex (-10 ~ 10) across Images, Connections, Stations, and Texts */}
+          {sortedRenderItems.map((entry) => {
+            if (entry.kind === 'image') {
+              const img = entry.item;
+              const isSelected = selectedImageId === img.id;
+              const isDraggingThis = draggingImageId === img.id;
+              const iScale = img.scale ?? 1;
+              const sx = iScale * (img.scaleX ?? 1);
+              const sy = iScale * (img.scaleY ?? 1);
+              const rot = img.rotation ?? 0;
+              const opacity = img.opacity ?? 1;
 
-            const lineColor = conn.color || activeColor;
-            const isSelected = selectedConnectionId === conn.id;
-            const isPathHighlighted = hasActiveNetworkPath && highlightedConnectionIdSet.has(conn.id);
-            const lineWidth = normalizeStrokeWidth(conn.strokeWidth ?? 6);
-            const cornerR = conn.cornerRadius ?? 14;
-            const lineCap = conn.lineCap ?? 'round';
-            const baseOpacity = conn.opacity ?? 1;
-            const lineOpacity = hasActiveNetworkPath
-              ? isPathHighlighted
-                ? Math.max(0.95, baseOpacity)
-                : baseOpacity * 0.22
-              : baseOpacity;
-            const strokeStyle = conn.strokeStyle ?? 'solid';
-            const strokeDasharray =
-              strokeStyle === 'dashed'
-                ? `${Math.max(6, lineWidth * 2)} ${Math.max(4, lineWidth * 1.3)}`
-                : strokeStyle === 'dotted'
-                ? `0.1 ${Math.max(6, lineWidth * 1.8)}`
-                : undefined;
+              return (
+                <g
+                  key={img.id}
+                  transform={`translate(${img.x}, ${img.y}) rotate(${rot}) scale(${sx}, ${sy})`}
+                  opacity={opacity}
+                  className={`cursor-move ${isDraggingThis ? 'opacity-90' : ''}`}
+                  onPointerDown={(e) => handleImagePointerDown(e, img)}
+                >
+                  <rect
+                    x={-img.width / 2}
+                    y={-img.height / 2}
+                    width={img.width}
+                    height={img.height}
+                    fill="transparent"
+                  />
+                  <image
+                    href={img.src}
+                    x={-img.width / 2}
+                    y={-img.height / 2}
+                    width={img.width}
+                    height={img.height}
+                    preserveAspectRatio={img.preserveAspectRatio === false ? 'none' : 'xMidYMid meet'}
+                    pointerEvents="none"
+                  />
+                  {isSelected && (
+                    <rect
+                      x={-img.width / 2}
+                      y={-img.height / 2}
+                      width={img.width}
+                      height={img.height}
+                      fill="none"
+                      stroke="#38BDF8"
+                      strokeWidth={1.5 / Math.max(0.25, Math.max(sx, sy))}
+                      pointerEvents="none"
+                      className="export-ignore"
+                    />
+                  )}
+                </g>
+              );
+            }
 
-            const pathData = getMetroPath(
-              fromSt.x,
-              fromSt.y,
-              toSt.x,
-              toSt.y,
-              conn.routeType || '135_bend',
-              cornerR,
-              conn.waypoints,
-              conn.isFlipped,
-              conn.angleA,
-              conn.angleB,
-              conn.offset ?? 0
-            );
+            if (entry.kind === 'connection') {
+              const conn = entry.item;
+              const fromSt = stations.find((s) => s.id === conn.fromStationId);
+              const toSt = stations.find((s) => s.id === conn.toStationId);
+              if (!fromSt || !toSt) return null;
+
+              const lineColor = conn.color || activeColor;
+              const isSelected = selectedConnectionId === conn.id;
+              const isPathHighlighted = hasActiveNetworkPath && highlightedConnectionIdSet.has(conn.id);
+              const lineWidth = normalizeStrokeWidth(conn.strokeWidth ?? 6);
+              const cornerR = conn.cornerRadius ?? 14;
+              const lineCap = conn.lineCap ?? 'round';
+              const baseOpacity = conn.opacity ?? 1;
+              const lineOpacity = hasActiveNetworkPath
+                ? isPathHighlighted
+                  ? Math.max(0.95, baseOpacity)
+                  : baseOpacity * 0.22
+                : baseOpacity;
+              const strokeStyle = conn.strokeStyle ?? 'solid';
+              const strokeDasharray =
+                strokeStyle === 'dashed'
+                  ? `${Math.max(6, lineWidth * 2)} ${Math.max(4, lineWidth * 1.3)}`
+                  : strokeStyle === 'dotted'
+                  ? `0.1 ${Math.max(6, lineWidth * 1.8)}`
+                  : undefined;
+
+              const pathData = getMetroPath(
+                fromSt.x,
+                fromSt.y,
+                toSt.x,
+                toSt.y,
+                conn.routeType || '135_bend',
+                cornerR,
+                conn.waypoints,
+                conn.isFlipped,
+                conn.angleA,
+                conn.angleB,
+                conn.offset ?? 0
+              );
+
+              return (
+                <g
+                  key={conn.id}
+                  className="cursor-pointer group"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectConnection(conn.id);
+                    onSelectStation(null);
+                    onSelectImage?.(null);
+                    onSelectText?.(null);
+                  }}
+                  onDoubleClick={(e) => handleLineDoubleClick(conn, e)}
+                >
+                  {/* Generous transparent hit area */}
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={Math.max(22, lineWidth + 16)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  {/* Pathfinding highlight aura under shortest-path connections */}
+                  {isPathHighlighted && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke="#FACC15"
+                      strokeWidth={lineWidth + 10}
+                      strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
+                      strokeLinejoin="round"
+                      opacity={0.45}
+                      className="export-ignore"
+                    />
+                  )}
+                  {/* Highlight outline when selected */}
+                  {isSelected && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={isLight ? '#0F172A' : '#ffffff'}
+                      strokeWidth={lineWidth + 6}
+                      strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
+                      strokeLinejoin="round"
+                      opacity={isLight ? 0.25 : 0.8}
+                      className="export-ignore"
+                    />
+                  )}
+                  {/* Main line body */}
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke={lineColor}
+                    strokeWidth={lineWidth}
+                    strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
+                    strokeLinejoin="round"
+                    strokeDasharray={strokeDasharray}
+                    opacity={lineOpacity}
+                  />
+                  {/* Inner cutout for double-track style */}
+                  {strokeStyle === 'double' && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={isLight ? '#F8FAFC' : '#020617'}
+                      strokeWidth={Math.max(1.5, lineWidth * 0.36)}
+                      strokeLinecap={lineCap}
+                      strokeLinejoin="round"
+                      opacity={lineOpacity}
+                      pointerEvents="none"
+                    />
+                  )}
+                </g>
+              );
+            }
+
+            if (entry.kind === 'station') {
+              const st = entry.item;
+              const isSelected = selectedStationId === st.id;
+              const isConnectSource = connectSourceStationId === st.id;
+              const isDraggingThis = draggingStationId === st.id;
+
+              const stConns = connections.filter(
+                (c) => c.fromStationId === st.id || c.toStationId === st.id
+              );
+              const distinctColors = Array.from(
+                new Set(stConns.map((c) => (c.color || activeColor).toUpperCase()))
+              );
+              const primaryColor = stConns.length > 0 ? (stConns[0].color || activeColor) : activeColor;
+
+              let labelDx = 0;
+              let labelDy = -18;
+              let textAnchor: 'middle' | 'start' | 'end' = 'middle';
+
+              if (st.labelPosition === 'custom' && st.labelOffset) {
+                labelDx = st.labelOffset.x;
+                labelDy = st.labelOffset.y;
+                if (labelDx > 10) textAnchor = 'start';
+                else if (labelDx < -10) textAnchor = 'end';
+                else textAnchor = 'middle';
+              } else {
+                const presetKey = (st.labelPosition || 'top') as keyof typeof LABEL_POSITION_PRESETS;
+                const preset = LABEL_POSITION_PRESETS[presetKey];
+                if (preset) {
+                  labelDx = preset.dx;
+                  labelDy = preset.dy;
+                  textAnchor = preset.textAnchor;
+                }
+              }
+
+              const stScale = st.scale ?? 1;
+              const sx = stScale * (st.scaleX ?? 1);
+              const sy = stScale * (st.scaleY ?? 1);
+              const stRot = st.rotation ?? 0;
+              const baseStOpacity = st.opacity ?? 1;
+              const isStationOnPath = hasActiveNetworkPath && highlightedStationIdSet.has(st.id);
+              const stOpacity = hasActiveNetworkPath
+                ? isStationOnPath
+                  ? Math.max(0.95, baseStOpacity)
+                  : baseStOpacity * 0.42
+                : baseStOpacity;
+              const maxScale = Math.max(sx, sy);
+              const lblScale = st.labelScale ?? 1;
+              const lblRot = st.labelRotation ?? 0;
+
+              return (
+                <g
+                  key={st.id}
+                  transform={`translate(${st.x}, ${st.y})`}
+                  className={`cursor-pointer ${isDraggingThis ? 'opacity-95' : ''}`}
+                  onPointerDown={(e) => handleStationPointerDown(e, st)}
+                  onPointerUp={(e) => handleStationPointerUp(e, st)}
+                >
+                  {/* Generous transparent hit area scaled proportionally to marker size */}
+                  <circle r={Math.max(26, 20 * maxScale)} fill="transparent" className="cursor-pointer" />
+
+                  {/* Multi-selection outer glowing indicator */}
+                  {currentSelectedStationIds.includes(st.id) && (
+                    <circle
+                      r={(st.isVirtual ? 16 : 21) * maxScale}
+                      fill="rgba(99, 102, 241, 0.18)"
+                      stroke="#6366F1"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                      pointerEvents="none"
+                      className="export-ignore"
+                    />
+                  )}
+
+                  {(isSelected || isConnectSource) && !currentSelectedStationIds.includes(st.id) && (
+                    <circle
+                      r={18 * maxScale}
+                      fill="none"
+                      stroke={isConnectSource ? activeColor : '#38BDF8'}
+                      strokeWidth={2.5}
+                      strokeDasharray={isConnectSource ? '4 3' : undefined}
+                      pointerEvents="none"
+                      className="export-ignore"
+                    />
+                  )}
+
+                  {/* Stage 3 Free SVG Transform Group for Station Marker */}
+                  <g
+                    transform={`rotate(${stRot}) scale(${sx}, ${sy})`}
+                    opacity={stOpacity}
+                    pointerEvents="none"
+                  >
+                    {st.isVirtual ? (
+                      <g pointerEvents="none">
+                        <circle
+                          r={8}
+                          fill="#000000"
+                          stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                          strokeWidth={1.8}
+                        />
+                        <line
+                          x1={-3.5}
+                          y1={-3.5}
+                          x2={3.5}
+                          y2={3.5}
+                          stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                          strokeWidth={1.8}
+                          strokeLinecap="round"
+                        />
+                        <line
+                          x1={3.5}
+                          y1={-3.5}
+                          x2={-3.5}
+                          y2={3.5}
+                          stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
+                          strokeWidth={1.8}
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
+                      (() => {
+                        const PALETTE = [
+                          '#E11D48', '#2563EB', '#16A34A', '#EA580C', '#854D0E',
+                          '#CA8A04', '#9333EA', '#06B6D4', '#EC4899', '#10B981',
+                          '#6366F1', '#F59E0B', '#14B8A6', '#8B5CF6', '#F43F5E'
+                        ];
+
+                        let colors = [...distinctColors];
+                        if (colors.length === 0) {
+                          colors = [primaryColor, '#2563EB'];
+                        } else if (colors.length === 1 && (st.type === 'interchange' || st.type === 'interchange_3line')) {
+                          const fallback = PALETTE.find((c) => c.toUpperCase() !== colors[0].toUpperCase()) || '#2563EB';
+                          colors.push(fallback);
+                        }
+
+                        const targetCount = st.interchangeLinesCount ?? (st.type === 'interchange_3line' ? Math.max(3, colors.length) : colors.length);
+                        if (targetCount > colors.length) {
+                          for (let i = 0; colors.length < targetCount; i++) {
+                            const fallbackColor = PALETTE[i % PALETTE.length];
+                            if (!colors.includes(fallbackColor)) {
+                              colors.push(fallbackColor);
+                            } else {
+                              colors.push(PALETTE[(i + 3) % PALETTE.length]);
+                            }
+                          }
+                        } else if (st.interchangeLinesCount && targetCount < colors.length) {
+                          colors = colors.slice(0, targetCount);
+                        }
+
+                        const N = Math.max(2, colors.length);
+                        const iStyle = st.interchangeStyle || 'dots';
+
+                        if (iStyle === 'pie') {
+                          const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
+                          const rPie = rOuter - 4;
+                          const rHub = Math.max(2, 2.8 - N * 0.08);
+
+                          return (
+                            <g pointerEvents="none">
+                              <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              {colors.map((c, idx) => {
+                                const degStart = -90 + (idx * 360) / N;
+                                const degEnd = -90 + ((idx + 1) * 360) / N;
+                                const radStart = (degStart * Math.PI) / 180;
+                                const radEnd = (degEnd * Math.PI) / 180;
+                                const x1 = Math.round(Math.cos(radStart) * rPie * 100) / 100;
+                                const y1 = Math.round(Math.sin(radStart) * rPie * 100) / 100;
+                                const x2 = Math.round(Math.cos(radEnd) * rPie * 100) / 100;
+                                const y2 = Math.round(Math.sin(radEnd) * rPie * 100) / 100;
+                                const largeArc = 360 / N > 180 ? 1 : 0;
+                                const pathData = `M 0 0 L ${x1} ${y1} A ${rPie} ${rPie} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+                                return (
+                                  <g key={idx}>
+                                    <path d={pathData} fill={c} />
+                                    <line x1={0} y1={0} x2={x1} y2={y1} stroke="#ffffff" strokeWidth={1.2} />
+                                  </g>
+                                );
+                              })}
+                              <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
+                            </g>
+                          );
+                        }
+
+                        if (iStyle === 'capsule') {
+                          const nodeSpacing = Math.max(7, Math.min(10, 36 / (N - 1 || 1)));
+                          const halfSpan = ((N - 1) * nodeSpacing) / 2;
+                          const capWidth = halfSpan * 2 + 20;
+                          const capHeight = 18;
+                          const nodeRadius = Math.max(2.8, Math.min(4, 14 / Math.sqrt(N)));
+
+                          return (
+                            <g pointerEvents="none">
+                              <rect
+                                x={-capWidth / 2}
+                                y={-capHeight / 2}
+                                width={capWidth}
+                                height={capHeight}
+                                rx={capHeight / 2}
+                                fill="#ffffff"
+                                stroke="#0f172a"
+                                strokeWidth={3.5}
+                              />
+                              <line
+                                x1={-halfSpan}
+                                y1={0}
+                                x2={halfSpan}
+                                y2={0}
+                                stroke="#0f172a"
+                                strokeWidth={2}
+                              />
+                              {colors.map((c, idx) => {
+                                const cx = -halfSpan + idx * nodeSpacing;
+                                return (
+                                  <circle
+                                    key={idx}
+                                    cx={cx}
+                                    cy={0}
+                                    r={nodeRadius}
+                                    fill={c}
+                                    stroke="#ffffff"
+                                    strokeWidth={1}
+                                  />
+                                );
+                              })}
+                            </g>
+                          );
+                        }
+
+                        if (N === 2) {
+                          return (
+                            <g pointerEvents="none">
+                              <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
+                              <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
+                            </g>
+                          );
+                        }
+
+                        if (N === 3) {
+                          return (
+                            <g pointerEvents="none">
+                              <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
+                              <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
+                              <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
+                              <circle r={1.2} fill="#0f172a" />
+                            </g>
+                          );
+                        }
+
+                        const rHub = Math.max(14, 11 + N * 0.9);
+                        const rOrbit = rHub - 6.5;
+                        const rDot = Math.max(2.2, Math.min(3.2, 22 / N));
+
+                        return (
+                          <g pointerEvents="none">
+                            <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                            {colors.map((c, idx) => {
+                              const deg = -90 + (idx * 360) / N;
+                              const rad = (deg * Math.PI) / 180;
+                              const cx = Math.round(Math.cos(rad) * rOrbit * 100) / 100;
+                              const cy = Math.round(Math.sin(rad) * rOrbit * 100) / 100;
+                              return (
+                                <circle
+                                  key={idx}
+                                  cx={cx}
+                                  cy={cy}
+                                  r={rDot}
+                                  fill={c}
+                                />
+                              );
+                            })}
+                            <circle r={1.4} fill="#0f172a" />
+                          </g>
+                        );
+                      })()
+                    ) : st.type === 'terminal' ? (
+                      <g pointerEvents="none">
+                        <rect
+                          x={-8}
+                          y={-8}
+                          width={16}
+                          height={16}
+                          rx={3}
+                          fill="#ffffff"
+                          stroke="#0f172a"
+                          strokeWidth={3}
+                        />
+                        <circle r={3} fill={primaryColor} />
+                      </g>
+                    ) : (
+                      <circle
+                        r={7}
+                        fill="#ffffff"
+                        stroke="#0f172a"
+                        strokeWidth={2.5}
+                      />
+                    )}
+                  </g>
+
+                  {/* Upright Virtual Node indicator badge when selected */}
+                  {st.isVirtual && isSelected && (
+                    <g transform={`translate(0, ${-15 * sy - 4})`} pointerEvents="none" className="export-ignore">
+                      <rect
+                        x={-28}
+                        y={-8}
+                        width={56}
+                        height={16}
+                        rx={4}
+                        fill={isLight ? '#FFFFFF' : '#0F172A'}
+                        stroke="#38BDF8"
+                        strokeWidth={1}
+                        opacity={0.95}
+                      />
+                      <text
+                        textAnchor="middle"
+                        y={3.5}
+                        className={`font-sans text-[9px] font-bold select-none ${
+                          isLight ? 'fill-sky-700' : 'fill-sky-300'
+                        }`}
+                      >
+                        虛擬節點
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Passenger Station Labels */}
+                  {!st.isVirtual && (
+                    <g
+                      transform={`translate(${labelDx}, ${labelDy})`}
+                      className="cursor-grab active:cursor-grabbing select-none"
+                      onPointerDown={(e) => handleLabelPointerDown(e, st)}
+                    >
+                      {(st.labelPosition === 'custom' || draggingLabelStationId === st.id) && (
+                        <line
+                          x1={-labelDx}
+                          y1={-labelDy}
+                          x2={0}
+                          y2={0}
+                          stroke={isSelected ? '#38BDF8' : '#94A3B8'}
+                          strokeWidth={1.2}
+                          strokeDasharray="3 3"
+                          opacity={draggingLabelStationId === st.id ? 0.9 : 0.45}
+                          pointerEvents="none"
+                        />
+                      )}
+
+                      <g transform={`rotate(${lblRot}) scale(${lblScale})`} opacity={stOpacity}>
+                        {(draggingLabelStationId === st.id || (isSelected && st.labelPosition === 'custom')) && (
+                          <rect
+                            x={textAnchor === 'middle' ? -38 : textAnchor === 'end' ? -76 : -6}
+                            y={-14}
+                            width={78}
+                            height={19}
+                            rx={4}
+                            fill={isLight ? '#E0F2FE' : '#082F49'}
+                            stroke="#38BDF8"
+                            strokeWidth={1}
+                            strokeDasharray={draggingLabelStationId === st.id ? '3 2' : undefined}
+                            opacity={0.85}
+                            pointerEvents="none"
+                            className="export-ignore"
+                          />
+                        )}
+
+                        <rect
+                          x={textAnchor === 'middle' ? -48 : textAnchor === 'end' ? -96 : -8}
+                          y={-15}
+                          width={96}
+                          height={22}
+                          fill="transparent"
+                          className="cursor-grab active:cursor-grabbing"
+                        />
+
+                        <text
+                          textAnchor={textAnchor}
+                          className={`font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
+                            isLight
+                              ? 'fill-white stroke-white'
+                              : 'fill-slate-950 stroke-slate-950'
+                          }`}
+                          strokeLinejoin="round"
+                        >
+                          {st.name}{' '}
+                          {st.code && (
+                            <tspan className={`font-mono text-[10px] ${isLight ? 'fill-white' : 'fill-slate-400'}`}>
+                              ({st.code})
+                            </tspan>
+                          )}
+                        </text>
+
+                        <text
+                          textAnchor={textAnchor}
+                          className={`font-sans font-semibold text-xs select-none pointer-events-none ${
+                            isLight ? 'fill-slate-900' : 'fill-slate-100'
+                          }`}
+                        >
+                          {st.name}{' '}
+                          {st.code && (
+                            <tspan className={`font-mono text-[10px] ${isLight ? 'fill-slate-500' : 'fill-slate-300'}`}>
+                              ({st.code})
+                            </tspan>
+                          )}
+                        </text>
+                      </g>
+
+                      {draggingLabelStationId === st.id && (
+                        <g transform={`translate(${textAnchor === 'middle' ? 0 : textAnchor === 'end' ? -35 : 35}, -20)`} pointerEvents="none" className="export-ignore">
+                          <rect
+                            x={-34}
+                            y={-8}
+                            width={68}
+                            height={16}
+                            rx={3}
+                            fill="#0284c7"
+                            opacity={0.96}
+                          />
+                          <text
+                            textAnchor="middle"
+                            y={3.5}
+                            className="font-mono text-[9px] fill-white font-bold select-none"
+                          >
+                            Δ{labelDx}, {labelDy}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  )}
+                </g>
+              );
+            }
+
+            // entry.kind === 'text'
+            const txt = entry.item;
+            const isSelected = selectedTextId === txt.id;
+            const isDraggingThis = draggingTextId === txt.id;
+            const { baseW, baseH, lines, lineHeight } = getTextBoxDimensions(txt);
+            const tScale = txt.scale ?? 1;
+            const sx = tScale * (txt.scaleX ?? 1);
+            const sy = tScale * (txt.scaleY ?? 1);
+            const rot = txt.rotation ?? 0;
+            const opacity = txt.opacity ?? 1;
+            const anchor = txt.textAnchor ?? 'middle';
+            const weightMap = { normal: 400, medium: 500, semibold: 600, bold: 700 } as const;
+            const fontWeight = weightMap[txt.fontWeight ?? 'semibold'];
+            const textX = anchor === 'start' ? -baseW / 2 + 8 : anchor === 'end' ? baseW / 2 - 8 : 0;
+            const firstY = -((lines.length - 1) * lineHeight) / 2 + txt.fontSize * 0.35;
+            const letterSpacing = txt.letterSpacing ?? 0;
+            const haloColor = isLight ? '#FFFFFF' : '#09090B';
 
             return (
               <g
-                key={conn.id}
-                className="cursor-pointer group"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectConnection(conn.id);
-                  onSelectStation(null);
-                }}
-                onDoubleClick={(e) => handleLineDoubleClick(conn, e)}
+                key={txt.id}
+                transform={`translate(${txt.x}, ${txt.y}) rotate(${rot}) scale(${sx}, ${sy})`}
+                opacity={opacity}
+                className={`cursor-move ${isDraggingThis ? 'opacity-90' : ''}`}
+                onPointerDown={(e) => handleTextPointerDown(e, txt)}
               >
-                {/* Generous transparent hit area */}
-                <path
-                  d={pathData}
-                  fill="none"
-                  stroke="transparent"
-                  strokeWidth={Math.max(22, lineWidth + 16)}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <rect
+                  x={-baseW / 2}
+                  y={-baseH / 2}
+                  width={baseW}
+                  height={baseH}
+                  fill="transparent"
                 />
-                {/* Pathfinding highlight aura under shortest-path connections */}
-                {isPathHighlighted && (
-                  <path
-                    d={pathData}
+                {isSelected && (
+                  <rect
+                    x={-baseW / 2}
+                    y={-baseH / 2}
+                    width={baseW}
+                    height={baseH}
                     fill="none"
-                    stroke="#FACC15"
-                    strokeWidth={lineWidth + 10}
-                    strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
-                    strokeLinejoin="round"
-                    opacity={0.45}
+                    stroke="#38BDF8"
+                    strokeWidth={1.2 / Math.max(0.25, Math.max(sx, sy))}
+                    strokeDasharray="3 2"
+                    pointerEvents="none"
                     className="export-ignore"
                   />
                 )}
-                {/* Highlight outline when selected */}
-                {isSelected && (
-                  <path
-                    d={pathData}
-                    fill="none"
-                    stroke={isLight ? '#0F172A' : '#ffffff'}
-                    strokeWidth={lineWidth + 6}
-                    strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
+                {txt.hasHalo && (
+                  <text
+                    x={textX}
+                    y={firstY}
+                    textAnchor={anchor}
+                    fontSize={txt.fontSize}
+                    fontWeight={fontWeight}
+                    letterSpacing={letterSpacing !== 0 ? letterSpacing : undefined}
+                    fill={haloColor}
+                    stroke={haloColor}
+                    strokeWidth={Math.max(3, txt.fontSize * 0.22)}
                     strokeLinejoin="round"
-                    opacity={isLight ? 0.25 : 0.8}
-                  />
+                    paintOrder="stroke"
+                    className="font-sans select-none pointer-events-none"
+                  >
+                    {lines.map((line, idx) => (
+                      <tspan key={idx} x={textX} dy={idx === 0 ? 0 : lineHeight}>
+                        {line.length > 0 ? line : ' '}
+                      </tspan>
+                    ))}
+                  </text>
                 )}
-                {/* Main line body */}
-                <path
-                  d={pathData}
-                  fill="none"
-                  stroke={lineColor}
-                  strokeWidth={lineWidth}
-                  strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
-                  strokeLinejoin="round"
-                  strokeDasharray={strokeDasharray}
-                  opacity={lineOpacity}
-                />
-                {/* Inner cutout for double-track style */}
-                {strokeStyle === 'double' && (
-                  <path
-                    d={pathData}
-                    fill="none"
-                    stroke={isLight ? '#F8FAFC' : '#020617'}
-                    strokeWidth={Math.max(1.5, lineWidth * 0.36)}
-                    strokeLinecap={lineCap}
-                    strokeLinejoin="round"
-                    opacity={lineOpacity}
-                    pointerEvents="none"
-                  />
-                )}
+                <text
+                  x={textX}
+                  y={firstY}
+                  textAnchor={anchor}
+                  fontSize={txt.fontSize}
+                  fontWeight={fontWeight}
+                  letterSpacing={letterSpacing !== 0 ? letterSpacing : undefined}
+                  fill={txt.color || (isLight ? '#18181B' : '#F4F4F5')}
+                  className="font-sans select-none pointer-events-none"
+                >
+                  {lines.map((line, idx) => (
+                    <tspan key={idx} x={textX} dy={idx === 0 ? 0 : lineHeight}>
+                      {line.length > 0 ? line : ' '}
+                    </tspan>
+                  ))}
+                </text>
               </g>
             );
           })}
@@ -2637,454 +3684,302 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             );
           })}
 
-          {/* Render Stations sorted by SVG zIndex (-10 ~ 10) */}
-          {sortedStations.map((st) => {
-            const isSelected = selectedStationId === st.id;
-            const isConnectSource = connectSourceStationId === st.id;
-            const isDraggingThis = draggingStationId === st.id;
+          {/* Stations now rendered inside unified sortedRenderItems loop above */}
 
-            const stConns = connections.filter(
-              (c) => c.fromStationId === st.id || c.toStationId === st.id
-            );
-            const distinctColors = Array.from(
-              new Set(stConns.map((c) => (c.color || activeColor).toUpperCase()))
-            );
-            const primaryColor = stConns.length > 0 ? (stConns[0].color || activeColor) : activeColor;
+          {/* Stage 3: Interactive SVG Image Free Transform Gizmo */}
+          {selectedImage &&
+            !draggingImageId &&
+            toolMode !== 'connect' &&
+            onUpdateImage && (() => {
+              const img = selectedImage;
+              const baseHalfW = img.width / 2;
+              const baseHalfH = img.height / 2;
+              const iScale = img.scale ?? 1;
+              const iScaleX = img.scaleX ?? 1;
+              const iScaleY = img.scaleY ?? 1;
+              const iRot = img.rotation ?? 0;
+              const halfW = Math.max(12, baseHalfW * iScale * iScaleX);
+              const halfH = Math.max(12, baseHalfH * iScale * iScaleY);
+              const invScale = 1 / Math.max(0.25, Math.min(2.5, viewTransform.scale));
+              const handleR = 4.5 * invScale;
+              const rotStem = 22 * invScale;
 
-            let labelDx = 0;
-            let labelDy = -18;
-            let textAnchor: 'middle' | 'start' | 'end' = 'middle';
+              const beginImageTransform = (
+                handle: TransformHandleKind,
+                e: React.PointerEvent
+              ) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const curWorld = screenToWorld(e.clientX, e.clientY, false);
+                const dx = curWorld.rawX - img.x;
+                const dy = curWorld.rawY - img.y;
+                imageTransformRef.current = {
+                  imageId: img.id,
+                  handle,
+                  centerX: img.x,
+                  centerY: img.y,
+                  baseHalfW,
+                  baseHalfH,
+                  startDist: Math.max(8, Math.hypot(dx, dy)),
+                  startAngle: (Math.atan2(dy, dx) * 180) / Math.PI,
+                  origScale: iScale,
+                  origScaleX: iScaleX,
+                  origScaleY: iScaleY,
+                  origRotation: iRot,
+                };
+              };
 
-            if (st.labelPosition === 'custom' && st.labelOffset) {
-              labelDx = st.labelOffset.x;
-              labelDy = st.labelOffset.y;
-              if (labelDx > 10) textAnchor = 'start';
-              else if (labelDx < -10) textAnchor = 'end';
-              else textAnchor = 'middle';
-            } else {
-              const presetKey = (st.labelPosition || 'top') as keyof typeof LABEL_POSITION_PRESETS;
-              const preset = LABEL_POSITION_PRESETS[presetKey];
-              if (preset) {
-                labelDx = preset.dx;
-                labelDy = preset.dy;
-                textAnchor = preset.textAnchor;
-              }
-            }
+              const corners: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'nw', x: -halfW, y: -halfH, cursor: 'nwse-resize' },
+                { kind: 'ne', x: halfW, y: -halfH, cursor: 'nesw-resize' },
+                { kind: 'se', x: halfW, y: halfH, cursor: 'nwse-resize' },
+                { kind: 'sw', x: -halfW, y: halfH, cursor: 'nesw-resize' },
+              ];
+              const edges: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'n', x: 0, y: -halfH, cursor: 'ns-resize' },
+                { kind: 'e', x: halfW, y: 0, cursor: 'ew-resize' },
+                { kind: 's', x: 0, y: halfH, cursor: 'ns-resize' },
+                { kind: 'w', x: -halfW, y: 0, cursor: 'ew-resize' },
+              ];
 
-            const stScale = st.scale ?? 1;
-            const sx = stScale * (st.scaleX ?? 1);
-            const sy = stScale * (st.scaleY ?? 1);
-            const stRot = st.rotation ?? 0;
-            const baseStOpacity = st.opacity ?? 1;
-            const isStationOnPath = hasActiveNetworkPath && highlightedStationIdSet.has(st.id);
-            const stOpacity = hasActiveNetworkPath
-              ? isStationOnPath
-                ? Math.max(0.95, baseStOpacity)
-                : baseStOpacity * 0.42
-              : baseStOpacity;
-            const maxScale = Math.max(sx, sy);
-            const lblScale = st.labelScale ?? 1;
-            const lblRot = st.labelRotation ?? 0;
-
-            return (
-              <g
-                key={st.id}
-                transform={`translate(${st.x}, ${st.y})`}
-                className={`cursor-pointer ${isDraggingThis ? 'opacity-95' : ''}`}
-                onPointerDown={(e) => handleStationPointerDown(e, st)}
-                onPointerUp={(e) => handleStationPointerUp(e, st)}
-              >
-                {/* Generous transparent hit area scaled proportionally to marker size */}
-                <circle r={Math.max(26, 20 * maxScale)} fill="transparent" className="cursor-pointer" />
-
-                {/* Multi-selection outer glowing indicator */}
-                {currentSelectedStationIds.includes(st.id) && (
-                  <circle
-                    r={(st.isVirtual ? 16 : 21) * maxScale}
-                    fill="rgba(99, 102, 241, 0.18)"
-                    stroke="#6366F1"
-                    strokeWidth={2}
-                    strokeDasharray="4 3"
-                    pointerEvents="none"
-                    className="export-ignore"
-                  />
-                )}
-
-                {(isSelected || isConnectSource) && !currentSelectedStationIds.includes(st.id) && (
-                  <circle
-                    r={18 * maxScale}
-                    fill="none"
-                    stroke={isConnectSource ? activeColor : '#38BDF8'}
-                    strokeWidth={2.5}
-                    strokeDasharray={isConnectSource ? '4 3' : undefined}
-                    pointerEvents="none"
-                    className="export-ignore"
-                  />
-                )}
-
-                {/* Stage 3 Free SVG Transform Group for Station Marker (Scale / Stretch / Rotate / Opacity) */}
-                <g
-                  transform={`rotate(${stRot}) scale(${sx}, ${sy})`}
-                  opacity={stOpacity}
-                  pointerEvents="none"
-                >
-                  {/* Virtual Node vs Passenger Station Display */}
-                  {st.isVirtual ? (
-                    <g pointerEvents="none">
-                      {/* Black circle with cross (X / 叉叉) in center */}
-                      <circle
-                        r={8}
-                        fill="#000000"
-                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                        strokeWidth={1.8}
-                      />
-                      <line
-                        x1={-3.5}
-                        y1={-3.5}
-                        x2={3.5}
-                        y2={3.5}
-                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                        strokeWidth={1.8}
-                        strokeLinecap="round"
-                      />
-                      <line
-                        x1={3.5}
-                        y1={-3.5}
-                        x2={-3.5}
-                        y2={3.5}
-                        stroke={isSelected ? '#38BDF8' : '#FFFFFF'}
-                        strokeWidth={1.8}
-                        strokeLinecap="round"
-                      />
-                    </g>
-                  ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
-                    /* Dynamic Unlimited N-Line Interchange Station (無限制多線換乘站) */
-                    (() => {
-                      const PALETTE = [
-                        '#E11D48', '#2563EB', '#16A34A', '#EA580C', '#854D0E',
-                        '#CA8A04', '#9333EA', '#06B6D4', '#EC4899', '#10B981',
-                        '#6366F1', '#F59E0B', '#14B8A6', '#8B5CF6', '#F43F5E'
-                      ];
-
-                      let colors = [...distinctColors];
-                      if (colors.length === 0) {
-                        colors = [primaryColor, '#2563EB'];
-                      } else if (colors.length === 1 && (st.type === 'interchange' || st.type === 'interchange_3line')) {
-                        const fallback = PALETTE.find((c) => c.toUpperCase() !== colors[0].toUpperCase()) || '#2563EB';
-                        colors.push(fallback);
-                      }
-
-                      // If manual lines count is specified or 3-line type selected, pad or trim colors
-                      const targetCount = st.interchangeLinesCount ?? (st.type === 'interchange_3line' ? Math.max(3, colors.length) : colors.length);
-                      if (targetCount > colors.length) {
-                        for (let i = 0; colors.length < targetCount; i++) {
-                          const fallbackColor = PALETTE[i % PALETTE.length];
-                          if (!colors.includes(fallbackColor)) {
-                            colors.push(fallbackColor);
-                          } else {
-                            colors.push(PALETTE[(i + 3) % PALETTE.length]);
-                          }
-                        }
-                      } else if (st.interchangeLinesCount && targetCount < colors.length) {
-                        colors = colors.slice(0, targetCount);
-                      }
-
-                      const N = Math.max(2, colors.length);
-                      const iStyle = st.interchangeStyle || 'dots';
-
-                      // 1. Pie Style (扇形輪盤切分 - 支援任意 N 等分 360° 輪盤)
-                      if (iStyle === 'pie') {
-                        const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
-                        const rPie = rOuter - 4;
-                        const rHub = Math.max(2, 2.8 - N * 0.08);
-
-                        return (
-                          <g pointerEvents="none">
-                            <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                            {colors.map((c, idx) => {
-                              const degStart = -90 + (idx * 360) / N;
-                              const degEnd = -90 + ((idx + 1) * 360) / N;
-                              const radStart = (degStart * Math.PI) / 180;
-                              const radEnd = (degEnd * Math.PI) / 180;
-                              const x1 = Math.round(Math.cos(radStart) * rPie * 100) / 100;
-                              const y1 = Math.round(Math.sin(radStart) * rPie * 100) / 100;
-                              const x2 = Math.round(Math.cos(radEnd) * rPie * 100) / 100;
-                              const y2 = Math.round(Math.sin(radEnd) * rPie * 100) / 100;
-                              const largeArc = 360 / N > 180 ? 1 : 0;
-                              const pathData = `M 0 0 L ${x1} ${y1} A ${rPie} ${rPie} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-
-                              return (
-                                <g key={idx}>
-                                  <path d={pathData} fill={c} />
-                                  <line x1={0} y1={0} x2={x1} y2={y1} stroke="#ffffff" strokeWidth={1.2} />
-                                </g>
-                              );
-                            })}
-                            <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
-                          </g>
-                        );
-                      }
-
-                      // 2. Capsule Style (連鎖延伸膠囊 - 支援任意 N 個節點橫向展開)
-                      if (iStyle === 'capsule') {
-                        const nodeSpacing = Math.max(7, Math.min(10, 36 / (N - 1 || 1)));
-                        const halfSpan = ((N - 1) * nodeSpacing) / 2;
-                        const capWidth = halfSpan * 2 + 20;
-                        const capHeight = 18;
-                        const nodeRadius = Math.max(2.8, Math.min(4, 14 / Math.sqrt(N)));
-
-                        return (
-                          <g pointerEvents="none">
-                            <rect
-                              x={-capWidth / 2}
-                              y={-capHeight / 2}
-                              width={capWidth}
-                              height={capHeight}
-                              rx={capHeight / 2}
-                              fill="#ffffff"
-                              stroke="#0f172a"
-                              strokeWidth={3.5}
-                            />
-                            <line
-                              x1={-halfSpan}
-                              y1={0}
-                              x2={halfSpan}
-                              y2={0}
-                              stroke="#0f172a"
-                              strokeWidth={2}
-                            />
-                            {colors.map((c, idx) => {
-                              const cx = -halfSpan + idx * nodeSpacing;
-                              return (
-                                <circle
-                                  key={idx}
-                                  cx={cx}
-                                  cy={0}
-                                  r={nodeRadius}
-                                  fill={c}
-                                  stroke="#ffffff"
-                                  strokeWidth={1}
-                                />
-                              );
-                            })}
-                          </g>
-                        );
-                      }
-
-                      // 3. Dots Style (色點陣列 - 2線平行、3線三角、4線以上環狀正多邊形陣列，無限制延伸)
-                      if (N === 2) {
-                        return (
-                          <g pointerEvents="none">
-                            <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                            <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
-                            <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
-                          </g>
-                        );
-                      }
-
-                      if (N === 3) {
-                        return (
-                          <g pointerEvents="none">
-                            <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                            <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
-                            <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
-                            <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
-                            <circle r={1.2} fill="#0f172a" />
-                          </g>
-                        );
-                      }
-
-                      // N >= 4: Regular N-gon Ring Layout
-                      const rHub = Math.max(14, 11 + N * 0.9);
-                      const rOrbit = rHub - 6.5;
-                      const rDot = Math.max(2.2, Math.min(3.2, 22 / N));
-
-                      return (
-                        <g pointerEvents="none">
-                          <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
-                          {colors.map((c, idx) => {
-                            const deg = -90 + (idx * 360) / N;
-                            const rad = (deg * Math.PI) / 180;
-                            const cx = Math.round(Math.cos(rad) * rOrbit * 100) / 100;
-                            const cy = Math.round(Math.sin(rad) * rOrbit * 100) / 100;
-                            return (
-                              <circle
-                                key={idx}
-                                cx={cx}
-                                cy={cy}
-                                r={rDot}
-                                fill={c}
-                              />
-                            );
-                          })}
-                          <circle r={1.4} fill="#0f172a" />
-                        </g>
-                      );
-                    })()
-                  ) : st.type === 'terminal' ? (
-                    <g pointerEvents="none">
-                      <rect
-                        x={-8}
-                        y={-8}
-                        width={16}
-                        height={16}
-                        rx={3}
-                        fill="#ffffff"
-                        stroke="#0f172a"
-                        strokeWidth={3}
-                      />
-                      <circle r={3} fill={primaryColor} />
-                    </g>
-                  ) : (
-                    <circle
-                      r={7}
-                      fill="#ffffff"
-                      stroke="#0f172a"
-                      strokeWidth={2.5}
+              return (
+                <g className="export-ignore" transform={`translate(${img.x}, ${img.y})`}>
+                  <g transform={`rotate(${iRot})`}>
+                    <rect
+                      x={-halfW}
+                      y={-halfH}
+                      width={halfW * 2}
+                      height={halfH * 2}
+                      fill="none"
+                      stroke="#38BDF8"
+                      strokeWidth={1.4 * invScale}
+                      strokeDasharray={`${4 * invScale} ${3 * invScale}`}
+                      pointerEvents="none"
                     />
+                    <line
+                      x1={0}
+                      y1={-halfH}
+                      x2={0}
+                      y2={-halfH - rotStem}
+                      stroke="#38BDF8"
+                      strokeWidth={1.4 * invScale}
+                      pointerEvents="none"
+                    />
+                    <circle
+                      cx={0}
+                      cy={-halfH - rotStem}
+                      r={handleR * 1.15}
+                      fill="#0284C7"
+                      stroke="#FFFFFF"
+                      strokeWidth={1.5 * invScale}
+                      style={{ cursor: 'grab' }}
+                      onPointerDown={(e) => beginImageTransform('rotate', e)}
+                    />
+                    {edges.map((h) => (
+                      <rect
+                        key={h.kind}
+                        x={h.x - handleR * 0.78}
+                        y={h.y - handleR * 0.78}
+                        width={handleR * 1.56}
+                        height={handleR * 1.56}
+                        rx={1.5 * invScale}
+                        fill="#FFFFFF"
+                        stroke="#0284C7"
+                        strokeWidth={1.4 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginImageTransform(h.kind, e)}
+                      />
+                    ))}
+                    {corners.map((h) => (
+                      <circle
+                        key={h.kind}
+                        cx={h.x}
+                        cy={h.y}
+                        r={handleR}
+                        fill="#38BDF8"
+                        stroke="#FFFFFF"
+                        strokeWidth={1.5 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginImageTransform(h.kind, e)}
+                      />
+                    ))}
+                  </g>
+                  {transformHudText && imageTransformRef.current?.imageId === img.id && (
+                    <g transform={`translate(0, ${halfH + 22 * invScale})`} pointerEvents="none">
+                      <rect
+                        x={-48 * invScale}
+                        y={-10 * invScale}
+                        width={96 * invScale}
+                        height={20 * invScale}
+                        rx={6 * invScale}
+                        fill="#0F172A"
+                        stroke="#38BDF8"
+                        strokeWidth={1.2 * invScale}
+                        opacity={0.96}
+                      />
+                      <text
+                        textAnchor="middle"
+                        y={3.5 * invScale}
+                        fill="#FFFFFF"
+                        fontSize={10 * invScale}
+                        fontWeight="700"
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {transformHudText}
+                      </text>
+                    </g>
                   )}
                 </g>
+              );
+            })()}
 
-                {/* Upright Virtual Node indicator badge when selected */}
-                {st.isVirtual && isSelected && (
-                  <g transform={`translate(0, ${-15 * sy - 4})`} pointerEvents="none" className="export-ignore">
+          {/* Stage 3: Interactive SVG Text Free Transform Gizmo */}
+          {selectedText &&
+            !draggingTextId &&
+            toolMode !== 'connect' &&
+            onUpdateText && (() => {
+              const txt = selectedText;
+              const { baseW, baseH } = getTextBoxDimensions(txt);
+              const baseHalfW = baseW / 2;
+              const baseHalfH = baseH / 2;
+              const tScale = txt.scale ?? 1;
+              const tScaleX = txt.scaleX ?? 1;
+              const tScaleY = txt.scaleY ?? 1;
+              const tRot = txt.rotation ?? 0;
+              const halfW = Math.max(12, baseHalfW * tScale * tScaleX);
+              const halfH = Math.max(10, baseHalfH * tScale * tScaleY);
+              const invScale = 1 / Math.max(0.25, Math.min(2.5, viewTransform.scale));
+              const handleR = 4.5 * invScale;
+              const rotStem = 22 * invScale;
+
+              const beginTextTransform = (
+                handle: TransformHandleKind,
+                e: React.PointerEvent
+              ) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const curWorld = screenToWorld(e.clientX, e.clientY, false);
+                const dx = curWorld.rawX - txt.x;
+                const dy = curWorld.rawY - txt.y;
+                textTransformRef.current = {
+                  textId: txt.id,
+                  handle,
+                  centerX: txt.x,
+                  centerY: txt.y,
+                  baseHalfW,
+                  baseHalfH,
+                  startDist: Math.max(8, Math.hypot(dx, dy)),
+                  startAngle: (Math.atan2(dy, dx) * 180) / Math.PI,
+                  origScale: tScale,
+                  origScaleX: tScaleX,
+                  origScaleY: tScaleY,
+                  origRotation: tRot,
+                };
+              };
+
+              const corners: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'nw', x: -halfW, y: -halfH, cursor: 'nwse-resize' },
+                { kind: 'ne', x: halfW, y: -halfH, cursor: 'nesw-resize' },
+                { kind: 'se', x: halfW, y: halfH, cursor: 'nwse-resize' },
+                { kind: 'sw', x: -halfW, y: halfH, cursor: 'nesw-resize' },
+              ];
+              const edges: Array<{ kind: TransformHandleKind; x: number; y: number; cursor: string }> = [
+                { kind: 'n', x: 0, y: -halfH, cursor: 'ns-resize' },
+                { kind: 'e', x: halfW, y: 0, cursor: 'ew-resize' },
+                { kind: 's', x: 0, y: halfH, cursor: 'ns-resize' },
+                { kind: 'w', x: -halfW, y: 0, cursor: 'ew-resize' },
+              ];
+
+              return (
+                <g className="export-ignore" transform={`translate(${txt.x}, ${txt.y})`}>
+                  <g transform={`rotate(${tRot})`}>
                     <rect
-                      x={-28}
-                      y={-8}
-                      width={56}
-                      height={16}
-                      rx={4}
-                      fill={isLight ? '#FFFFFF' : '#0F172A'}
+                      x={-halfW}
+                      y={-halfH}
+                      width={halfW * 2}
+                      height={halfH * 2}
+                      fill="none"
                       stroke="#38BDF8"
-                      strokeWidth={1}
-                      opacity={0.95}
+                      strokeWidth={1.4 * invScale}
+                      strokeDasharray={`${4 * invScale} ${3 * invScale}`}
+                      pointerEvents="none"
                     />
-                    <text
-                      textAnchor="middle"
-                      y={3.5}
-                      className={`font-sans text-[9px] font-bold select-none ${
-                        isLight ? 'fill-sky-700' : 'fill-sky-300'
-                      }`}
-                    >
-                      虛擬節點
-                    </text>
-                  </g>
-                )}
-
-                {/* Passenger Station Labels (Only for non-virtual stations) - 支援 8 方位、直接拖曳自由站名與獨立縮放/旋轉 */}
-                {!st.isVirtual && (
-                  <g
-                    transform={`translate(${labelDx}, ${labelDy})`}
-                    className="cursor-grab active:cursor-grabbing select-none"
-                    onPointerDown={(e) => handleLabelPointerDown(e, st)}
-                  >
-                    {/* Visual dashed tether leader line connecting station center to custom / dragged label */}
-                    {(st.labelPosition === 'custom' || draggingLabelStationId === st.id) && (
-                      <line
-                        x1={-labelDx}
-                        y1={-labelDy}
-                        x2={0}
-                        y2={0}
-                        stroke={isSelected ? '#38BDF8' : '#94A3B8'}
-                        strokeWidth={1.2}
-                        strokeDasharray="3 3"
-                        opacity={draggingLabelStationId === st.id ? 0.9 : 0.45}
-                        pointerEvents="none"
-                      />
-                    )}
-
-                    {/* Transformed Label Visuals (labelScale, labelRotation, opacity) */}
-                    <g
-                      transform={`rotate(${lblRot}) scale(${lblScale})`}
-                      opacity={stOpacity}
-                    >
-                      {/* Subtle pill highlight when dragging or when selected in custom mode */}
-                      {(draggingLabelStationId === st.id || (isSelected && st.labelPosition === 'custom')) && (
-                        <rect
-                          x={textAnchor === 'middle' ? -38 : textAnchor === 'end' ? -76 : -6}
-                          y={-14}
-                          width={78}
-                          height={19}
-                          rx={4}
-                          fill={isLight ? '#E0F2FE' : '#082F49'}
-                          stroke="#38BDF8"
-                          strokeWidth={1}
-                          strokeDasharray={draggingLabelStationId === st.id ? '3 2' : undefined}
-                          opacity={0.85}
-                          pointerEvents="none"
-                        />
-                      )}
-
-                      {/* Generous hit box for effortless clicking & dragging of station name label */}
+                    <line
+                      x1={0}
+                      y1={-halfH}
+                      x2={0}
+                      y2={-halfH - rotStem}
+                      stroke="#38BDF8"
+                      strokeWidth={1.4 * invScale}
+                      pointerEvents="none"
+                    />
+                    <circle
+                      cx={0}
+                      cy={-halfH - rotStem}
+                      r={handleR * 1.15}
+                      fill="#0284C7"
+                      stroke="#FFFFFF"
+                      strokeWidth={1.5 * invScale}
+                      style={{ cursor: 'grab' }}
+                      onPointerDown={(e) => beginTextTransform('rotate', e)}
+                    />
+                    {edges.map((h) => (
                       <rect
-                        x={textAnchor === 'middle' ? -48 : textAnchor === 'end' ? -96 : -8}
-                        y={-15}
-                        width={96}
-                        height={22}
-                        fill="transparent"
-                        className="cursor-grab active:cursor-grabbing"
+                        key={h.kind}
+                        x={h.x - handleR * 0.78}
+                        y={h.y - handleR * 0.78}
+                        width={handleR * 1.56}
+                        height={handleR * 1.56}
+                        rx={1.5 * invScale}
+                        fill="#FFFFFF"
+                        stroke="#0284C7"
+                        strokeWidth={1.4 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginTextTransform(h.kind, e)}
                       />
-
-                      {/* Stroke halo outline for clean readability across metro lines */}
+                    ))}
+                    {corners.map((h) => (
+                      <circle
+                        key={h.kind}
+                        cx={h.x}
+                        cy={h.y}
+                        r={handleR}
+                        fill="#38BDF8"
+                        stroke="#FFFFFF"
+                        strokeWidth={1.5 * invScale}
+                        style={{ cursor: h.cursor }}
+                        onPointerDown={(e) => beginTextTransform(h.kind, e)}
+                      />
+                    ))}
+                  </g>
+                  {transformHudText && textTransformRef.current?.textId === txt.id && (
+                    <g transform={`translate(0, ${halfH + 22 * invScale})`} pointerEvents="none">
+                      <rect
+                        x={-48 * invScale}
+                        y={-10 * invScale}
+                        width={96 * invScale}
+                        height={20 * invScale}
+                        rx={6 * invScale}
+                        fill="#0F172A"
+                        stroke="#38BDF8"
+                        strokeWidth={1.2 * invScale}
+                        opacity={0.96}
+                      />
                       <text
-                        textAnchor={textAnchor}
-                        className={`font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
-                          isLight
-                            ? 'fill-white stroke-white'
-                            : 'fill-slate-950 stroke-slate-950'
-                        }`}
-                        strokeLinejoin="round"
+                        textAnchor="middle"
+                        y={3.5 * invScale}
+                        fill="#FFFFFF"
+                        fontSize={10 * invScale}
+                        fontWeight="700"
+                        fontFamily="ui-monospace, monospace"
                       >
-                        {st.name}{' '}
-                        {st.code && (
-                          <tspan className={`font-mono text-[10px] ${isLight ? 'fill-white' : 'fill-slate-400'}`}>
-                            ({st.code})
-                          </tspan>
-                        )}
-                      </text>
-
-                      {/* Foreground station name text */}
-                      <text
-                        textAnchor={textAnchor}
-                        className={`font-sans font-semibold text-xs select-none pointer-events-none ${
-                          isLight ? 'fill-slate-900' : 'fill-slate-100'
-                        }`}
-                      >
-                        {st.name}{' '}
-                        {st.code && (
-                          <tspan className={`font-mono text-[10px] ${isLight ? 'fill-slate-500' : 'fill-slate-300'}`}>
-                            ({st.code})
-                          </tspan>
-                        )}
+                        {transformHudText}
                       </text>
                     </g>
-
-                    {/* Live Dragging Offset Tooltip HUD Badge */}
-                    {draggingLabelStationId === st.id && (
-                      <g transform={`translate(${textAnchor === 'middle' ? 0 : textAnchor === 'end' ? -35 : 35}, -20)`} pointerEvents="none">
-                        <rect
-                          x={-34}
-                          y={-8}
-                          width={68}
-                          height={16}
-                          rx={3}
-                          fill="#0284c7"
-                          opacity={0.96}
-                        />
-                        <text
-                          textAnchor="middle"
-                          y={3.5}
-                          className="font-mono text-[9px] fill-white font-bold select-none"
-                        >
-                          Δ{labelDx}, {labelDy}
-                        </text>
-                      </g>
-                    )}
-                  </g>
-                )}
-              </g>
-            );
-          })}
+                  )}
+                </g>
+              );
+            })()}
 
           {/* Stage 3: Interactive Single-Station SVG Free Transform Gizmo */}
           {selectedSingleStation &&
@@ -3619,21 +4514,39 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
       {/* Floating Single Element Quick Controls */}
       {((selectedConn && onUpdateConnectionZIndex) ||
-        (selectedSingleStation && onUpdateStationZIndex)) && (() => {
+        (selectedSingleStation && onUpdateStationZIndex) ||
+        (selectedImage && onUpdateImageZIndex) ||
+        (selectedText && onUpdateTextZIndex)) && (() => {
         const isConn = Boolean(selectedConn);
+        const isImg = Boolean(!isConn && selectedImage);
+        const isTxt = Boolean(!isConn && !isImg && selectedText);
         const currentZ = clampZOrder(
-          isConn ? selectedConn?.zIndex ?? 0 : selectedSingleStation?.zIndex ?? 0
+          isConn
+            ? selectedConn?.zIndex ?? 0
+            : isImg
+            ? selectedImage?.zIndex ?? -1
+            : isTxt
+            ? selectedText?.zIndex ?? 1
+            : selectedSingleStation?.zIndex ?? 0
         );
         const setZ = (next: number) => {
           const clamped = clampZOrder(next);
           if (isConn && selectedConn && onUpdateConnectionZIndex) {
             onUpdateConnectionZIndex(selectedConn.id, clamped);
+          } else if (isImg && selectedImage && onUpdateImageZIndex) {
+            onUpdateImageZIndex(selectedImage.id, clamped);
+          } else if (isTxt && selectedText && onUpdateTextZIndex) {
+            onUpdateTextZIndex(selectedText.id, clamped);
           } else if (selectedSingleStation && onUpdateStationZIndex) {
             onUpdateStationZIndex(selectedSingleStation.id, clamped);
           }
         };
         const labelText = isConn
           ? '路線段'
+          : isImg
+          ? selectedImage?.name || 'SVG 圖片'
+          : isTxt
+          ? selectedText?.content?.split('\n')[0] || 'SVG 文字'
           : selectedSingleStation?.isVirtual
           ? '虛擬節點'
           : selectedSingleStation?.name || '車站';
@@ -3816,7 +4729,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             )}
 
             {/* Quick Station SVG Scale Controls */}
-            {!isConn && selectedSingleStation && onUpdateStation && (() => {
+            {!isConn && !isImg && !isTxt && selectedSingleStation && onUpdateStation && (() => {
               const curScale = normalizeSvgScale(selectedSingleStation.scale ?? 1);
               return (
                 <div
@@ -3871,6 +4784,128 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     title="放大 (+0.2×)"
                   >
                     +0.2
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* Quick Image SVG Scale Controls */}
+            {isImg && selectedImage && onUpdateImage && (() => {
+              const curScale = normalizeSvgScale(selectedImage.scale ?? 1);
+              return (
+                <div
+                  className={`flex items-center gap-0.5 pl-2 ml-0.5 border-l ${
+                    isLight ? 'border-zinc-200' : 'border-zinc-800'
+                  }`}
+                >
+                  <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    縮放
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateImage({
+                        ...selectedImage,
+                        scale: normalizeSvgScale(curScale - 0.2, 0.08),
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="縮小 (-0.2×)"
+                  >
+                    -0.2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateImage({
+                        ...selectedImage,
+                        scale: 1,
+                        scaleX: 1,
+                        scaleY: 1,
+                        rotation: 0,
+                      });
+                    }}
+                    className={`${btnClass} font-mono tabular-nums font-semibold`}
+                    title="點擊重設縮放與旋轉 (1×)"
+                  >
+                    {curScale}×
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateImage({
+                        ...selectedImage,
+                        scale: normalizeSvgScale(curScale + 0.2, 0.08),
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="放大 (+0.2×)"
+                  >
+                    +0.2
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* Quick Text SVG Font Size & Scale Controls */}
+            {isTxt && selectedText && onUpdateText && (() => {
+              const curScale = normalizeSvgScale(selectedText.scale ?? 1);
+              return (
+                <div
+                  className={`flex items-center gap-0.5 pl-2 ml-0.5 border-l ${
+                    isLight ? 'border-zinc-200' : 'border-zinc-800'
+                  }`}
+                >
+                  <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    字級
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateText({
+                        ...selectedText,
+                        fontSize: Math.max(4, selectedText.fontSize - 2),
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="減小字級 (-2)"
+                  >
+                    -2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateText({
+                        ...selectedText,
+                        scale: 1,
+                        scaleX: 1,
+                        scaleY: 1,
+                        rotation: 0,
+                      });
+                    }}
+                    className={`${btnClass} font-mono tabular-nums font-semibold`}
+                    title="點擊重設文字比例與旋轉"
+                  >
+                    {selectedText.fontSize}{curScale !== 1 ? ` · ${curScale}×` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRecordHistory?.();
+                      onUpdateText({
+                        ...selectedText,
+                        fontSize: selectedText.fontSize + 2,
+                      });
+                    }}
+                    className={`${btnClass} font-mono`}
+                    title="加大字級 (+2)"
+                  >
+                    +2
                   </button>
                 </div>
               );

@@ -14,7 +14,9 @@ import {
   ThemeMode,
   EffectiveTheme,
   clampZOrder,
-  clampLineOffset
+  clampLineOffset,
+  CanvasImage,
+  CanvasText,
 } from './types/metro';
 import { DEFAULT_LINES, DEMO_STATIONS, DEMO_CONNECTIONS } from './data/initialData';
 import { MetroCanvas } from './components/MetroCanvas';
@@ -39,6 +41,8 @@ const STORAGE_KEY = 'metro_network_data';
 interface HistorySnapshot {
   stations: Station[];
   connections: Connection[];
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
 }
 
 interface SavedNetworkData {
@@ -46,6 +50,8 @@ interface SavedNetworkData {
   savedAt: string;
   stations: Station[];
   connections: Connection[];
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
 }
 
 const loadSavedNetwork = (): SavedNetworkData | null => {
@@ -67,6 +73,8 @@ export default function App() {
   const [stations, setStations] = useState<Station[]>(() => initialSavedRef.current?.stations ?? DEMO_STATIONS);
   const [lines] = useState<MetroLine[]>(DEFAULT_LINES);
   const [connections, setConnections] = useState<Connection[]>(() => initialSavedRef.current?.connections ?? DEMO_CONNECTIONS);
+  const [svgImages, setSvgImages] = useState<CanvasImage[]>(() => initialSavedRef.current?.svgImages ?? []);
+  const [svgTexts, setSvgTexts] = useState<CanvasText[]>(() => initialSavedRef.current?.svgTexts ?? []);
 
   // Auto-save state & references
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() =>
@@ -74,15 +82,22 @@ export default function App() {
   );
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const hasUnsavedChangesRef = useRef<boolean>(false);
-  const currentNetworkRef = useRef<{ stations: Station[]; connections: Connection[] }>({
+  const currentNetworkRef = useRef<{
+    stations: Station[];
+    connections: Connection[];
+    svgImages: CanvasImage[];
+    svgTexts: CanvasText[];
+  }>({
     stations,
     connections,
+    svgImages,
+    svgTexts,
   });
 
   // Keep network ref synchronized with latest state
   useEffect(() => {
-    currentNetworkRef.current = { stations, connections };
-  }, [stations, connections]);
+    currentNetworkRef.current = { stations, connections, svgImages, svgTexts };
+  }, [stations, connections, svgImages, svgTexts]);
 
   // History Stack for Undo/Redo operations
   const [past, setPast] = useState<HistorySnapshot[]>([]);
@@ -95,6 +110,8 @@ export default function App() {
       const snapshot: HistorySnapshot = {
         stations: currentNetworkRef.current.stations,
         connections: currentNetworkRef.current.connections,
+        svgImages: currentNetworkRef.current.svgImages,
+        svgTexts: currentNetworkRef.current.svgTexts,
       };
       return [...prev.slice(-MAX_HISTORY + 1), snapshot];
     });
@@ -114,15 +131,21 @@ export default function App() {
         {
           stations: currentNetworkRef.current.stations,
           connections: currentNetworkRef.current.connections,
+          svgImages: currentNetworkRef.current.svgImages,
+          svgTexts: currentNetworkRef.current.svgTexts,
         },
         ...prevFuture,
       ]);
 
       setStations(previous.stations);
       setConnections(previous.connections);
+      setSvgImages(previous.svgImages ?? []);
+      setSvgTexts(previous.svgTexts ?? []);
       setSelectedStationId(null);
       setSelectedStationIds([]);
       setSelectedConnectionId(null);
+      setSelectedImageId(null);
+      setSelectedTextId(null);
       hasUnsavedChangesRef.current = true;
 
       return newPast;
@@ -145,15 +168,21 @@ export default function App() {
           {
             stations: currentNetworkRef.current.stations,
             connections: currentNetworkRef.current.connections,
+            svgImages: currentNetworkRef.current.svgImages,
+            svgTexts: currentNetworkRef.current.svgTexts,
           },
         ];
       });
 
       setStations(next.stations);
       setConnections(next.connections);
+      setSvgImages(next.svgImages ?? []);
+      setSvgTexts(next.svgTexts ?? []);
       setSelectedStationId(null);
       setSelectedStationIds([]);
       setSelectedConnectionId(null);
+      setSelectedImageId(null);
+      setSelectedTextId(null);
       hasUnsavedChangesRef.current = true;
 
       return newFuture;
@@ -198,6 +227,8 @@ export default function App() {
         savedAt: new Date().toISOString(),
         stations: currentNetworkRef.current.stations,
         connections: currentNetworkRef.current.connections,
+        svgImages: currentNetworkRef.current.svgImages,
+        svgTexts: currentNetworkRef.current.svgTexts,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       hasUnsavedChangesRef.current = false;
@@ -209,10 +240,10 @@ export default function App() {
     }
   };
 
-  // 1. Listen to stations and connections changes via useEffect
+  // 1. Listen to stations, connections, svgImages, svgTexts changes via useEffect
   useEffect(() => {
     hasUnsavedChangesRef.current = true;
-  }, [stations, connections]);
+  }, [stations, connections, svgImages, svgTexts]);
 
   // 2. Periodic 30-second auto-save timer + beforeunload hook to protect against unexpected tab/browser closing
   useEffect(() => {
@@ -230,6 +261,8 @@ export default function App() {
             savedAt: new Date().toISOString(),
             stations: currentNetworkRef.current.stations,
             connections: currentNetworkRef.current.connections,
+            svgImages: currentNetworkRef.current.svgImages,
+            svgTexts: currentNetworkRef.current.svgTexts,
           };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
         } catch {
@@ -322,7 +355,14 @@ export default function App() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [selectedStationIds, setSelectedStationIds] = useState<string[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'inspector' | 'stats' | 'routing'>('inspector');
+
+  const viewportCenterRef = useRef<Point>({ x: 300, y: 220 });
+  const handleViewportCenterChange = useCallback((center: Point) => {
+    viewportCenterRef.current = center;
+  }, []);
 
   const [gridSnap, setGridSnap] = useState<boolean>(true);
   const [gridSize, setGridSize] = useState<number>(20);
@@ -682,6 +722,109 @@ export default function App() {
     if (selectedConnectionId === id) setSelectedConnectionId(null);
   };
 
+  // SVG Image & Text Handlers
+  const handleAddImage = (imgData: Omit<CanvasImage, 'id' | 'x' | 'y'>) => {
+    pushHistory();
+    const center = viewportCenterRef.current;
+    const newImg: CanvasImage = {
+      ...imgData,
+      id: `img-${Date.now()}`,
+      x: Math.round(center.x),
+      y: Math.round(center.y),
+      zIndex: imgData.zIndex ?? -1,
+    };
+    setSvgImages((prev) => [...prev, newImg]);
+    setSelectedImageId(newImg.id);
+    setSelectedTextId(null);
+    setSelectedStationId(null);
+    setSelectedStationIds([]);
+    setSelectedConnectionId(null);
+    setToolMode('select');
+    setSidebarTab('inspector');
+  };
+
+  const handleUpdateImage = (updated: CanvasImage) => {
+    pushHistory();
+    setSvgImages((prev) => prev.map((img) => (img.id === updated.id ? updated : img)));
+  };
+
+  const handleUpdateImageLive = (updated: CanvasImage) => {
+    setSvgImages((prev) => prev.map((img) => (img.id === updated.id ? updated : img)));
+  };
+
+  const handleUpdateImageZIndex = (id: string, zIndex: number) => {
+    const clamped = clampZOrder(zIndex);
+    const current = svgImages.find((img) => img.id === id);
+    if (!current || (current.zIndex ?? -1) === clamped) return;
+    pushHistory();
+    setSvgImages((prev) =>
+      prev.map((img) => (img.id === id ? { ...img, zIndex: clamped } : img))
+    );
+  };
+
+  const handleDeleteImage = (id: string) => {
+    pushHistory();
+    setSvgImages((prev) => prev.filter((img) => img.id !== id));
+    if (selectedImageId === id) setSelectedImageId(null);
+  };
+
+  const handleAddText = (partial?: Partial<CanvasText>) => {
+    pushHistory();
+    const center = viewportCenterRef.current;
+    const newText: CanvasText = {
+      id: `txt-${Date.now()}`,
+      content: '標註文字',
+      x: Math.round(center.x),
+      y: Math.round(center.y),
+      fontSize: 20,
+      color: isLight ? '#18181B' : '#F4F4F5',
+      fontWeight: 'semibold',
+      textAnchor: 'middle',
+      letterSpacing: 0,
+      hasHalo: true,
+      scale: 1,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
+      opacity: 1,
+      zIndex: 1,
+      ...partial,
+    };
+    setSvgTexts((prev) => [...prev, newText]);
+    setSelectedTextId(newText.id);
+    setSelectedImageId(null);
+    setSelectedStationId(null);
+    setSelectedStationIds([]);
+    setSelectedConnectionId(null);
+    setToolMode('select');
+    setSidebarTab('inspector');
+  };
+
+  const handleUpdateText = (updated: CanvasText) => {
+    pushHistory();
+    setSvgTexts((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  };
+
+  const handleUpdateTextLive = (updated: CanvasText) => {
+    setSvgTexts((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  };
+
+  const handleUpdateTextZIndex = (id: string, zIndex: number) => {
+    const clamped = clampZOrder(zIndex);
+    const current = svgTexts.find((t) => t.id === id);
+    if (!current || (current.zIndex ?? 1) === clamped) return;
+    pushHistory();
+    setSvgTexts((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, zIndex: clamped } : t))
+    );
+  };
+
+  const handleDeleteText = (id: string) => {
+    pushHistory();
+    setSvgTexts((prev) => prev.filter((t) => t.id !== id));
+    if (selectedTextId === id) setSelectedTextId(null);
+  };
+
   const handleDeleteSelected = () => {
     if (selectedStationIds.length > 0) {
       handleBatchDeleteStations(selectedStationIds);
@@ -689,17 +832,26 @@ export default function App() {
       handleDeleteStation(selectedStationId);
     } else if (selectedConnectionId) {
       handleDeleteConnection(selectedConnectionId);
+    } else if (selectedImageId) {
+      handleDeleteImage(selectedImageId);
+    } else if (selectedTextId) {
+      handleDeleteText(selectedTextId);
     }
   };
 
   // Clear Canvas
   const handleClearCanvas = () => {
-    if (window.confirm('確定要清空畫布上的所有節點與連線嗎？')) {
+    if (window.confirm('確定要清空畫布上的所有節點、連線、圖片與文字嗎？')) {
       pushHistory();
       setStations([]);
       setConnections([]);
+      setSvgImages([]);
+      setSvgTexts([]);
       setSelectedStationId(null);
+      setSelectedStationIds([]);
       setSelectedConnectionId(null);
+      setSelectedImageId(null);
+      setSelectedTextId(null);
       hasUnsavedChangesRef.current = true;
       try {
         localStorage.removeItem(STORAGE_KEY);
@@ -716,7 +868,10 @@ export default function App() {
     setStations(DEMO_STATIONS);
     setConnections(DEMO_CONNECTIONS);
     setSelectedStationId(null);
+    setSelectedStationIds([]);
     setSelectedConnectionId(null);
+    setSelectedImageId(null);
+    setSelectedTextId(null);
     hasUnsavedChangesRef.current = true;
   };
 
@@ -731,6 +886,8 @@ export default function App() {
       recentColors,
       stations,
       connections,
+      svgImages,
+      svgTexts,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -743,6 +900,8 @@ export default function App() {
 
   const selectedStation = stations.find((s) => s.id === selectedStationId) || null;
   const selectedConnection = connections.find((c) => c.id === selectedConnectionId) || null;
+  const selectedImage = svgImages.find((img) => img.id === selectedImageId) || null;
+  const selectedText = svgTexts.find((t) => t.id === selectedTextId) || null;
 
   return (
     <div
@@ -950,7 +1109,7 @@ export default function App() {
 
       {/* Main Workspace: Left Toolbar + Infinite Canvas + Right Inspector Sidebar */}
       <div className="flex flex-1 min-h-0 relative">
-        {/* Left Toolbar: Select, Create Node, Virtual Node, Connect Nodes (with 5-style flyout), and Active Color */}
+        {/* Left Toolbar: Select, Create Node, Virtual Node, Connect Nodes (with 5-style flyout), SVG Image & Text, and Active Color */}
         <LeftToolbar
           toolMode={toolMode}
           onSetToolMode={(mode) => {
@@ -958,12 +1117,16 @@ export default function App() {
             if (mode === 'add_station' || mode === 'add_virtual_node') {
               setSelectedStationId(null);
               setSelectedConnectionId(null);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
             }
           }}
           activeRouteType={activeRouteType}
           onChangeRouteType={setActiveRouteType}
           activeColor={activeColor}
           onOpenColorModal={() => setIsColorModalOpen(true)}
+          onAddImage={handleAddImage}
+          onAddText={() => handleAddText()}
           theme={effectiveTheme}
         />
 
@@ -990,6 +1153,8 @@ export default function App() {
           onClose={() => setIsExportModalOpen(false)}
           stations={stations}
           connections={connections}
+          svgImages={svgImages}
+          svgTexts={svgTexts}
           theme={effectiveTheme}
           onExportJSON={handleExportJSON}
           initialFormat={exportModalFormat}
@@ -1000,12 +1165,16 @@ export default function App() {
           stations={stations}
           lines={lines}
           connections={connections}
+          svgImages={svgImages}
+          svgTexts={svgTexts}
           activeColor={activeColor}
           toolMode={toolMode}
           onSetToolMode={setToolMode}
           selectedStationId={selectedStationId}
           selectedStationIds={selectedStationIds}
           selectedConnectionId={selectedConnectionId}
+          selectedImageId={selectedImageId}
+          selectedTextId={selectedTextId}
           gridSnap={gridSnap}
           gridSize={gridSize}
           nodeAlign={nodeAlign}
@@ -1014,6 +1183,8 @@ export default function App() {
             setSelectedStationId(id);
             if (id) {
               setSelectedConnectionId(null);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
               setSelectedStationIds((prev) => (prev.includes(id) && prev.length > 1 ? prev : [id]));
             } else {
               setSelectedStationIds([]);
@@ -1023,8 +1194,12 @@ export default function App() {
             setSelectedStationIds(ids);
             if (ids.length === 0) {
               setSelectedStationId(null);
-            } else if (!ids.includes(selectedStationId || '')) {
-              setSelectedStationId(ids[0]);
+            } else {
+              setSelectedImageId(null);
+              setSelectedTextId(null);
+              if (!ids.includes(selectedStationId || '')) {
+                setSelectedStationId(ids[0]);
+              }
             }
           }}
           onSelectConnection={(id) => {
@@ -1032,6 +1207,28 @@ export default function App() {
             if (id) {
               setSelectedStationId(null);
               setSelectedStationIds([]);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
+            }
+          }}
+          onSelectImage={(id) => {
+            setSelectedImageId(id);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+              setSelectedConnectionId(null);
+              setSelectedTextId(null);
+              setSidebarTab('inspector');
+            }
+          }}
+          onSelectText={(id) => {
+            setSelectedTextId(id);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+              setSelectedConnectionId(null);
+              setSelectedImageId(null);
+              setSidebarTab('inspector');
             }
           }}
           onAddStation={handleAddStation}
@@ -1047,6 +1244,11 @@ export default function App() {
           onUpdateConnectionZIndex={handleUpdateConnectionZIndex}
           onUpdateConnectionOffset={handleUpdateConnectionOffset}
           onUpdateConnectionStyle={handleUpdateConnectionStyleLive}
+          onUpdateImage={handleUpdateImageLive}
+          onUpdateText={handleUpdateTextLive}
+          onUpdateImageZIndex={handleUpdateImageZIndex}
+          onUpdateTextZIndex={handleUpdateTextZIndex}
+          onViewportCenterChange={handleViewportCenterChange}
           onDeleteSelected={handleDeleteSelected}
           onRecordHistory={pushHistory}
           theme={effectiveTheme}
@@ -1055,12 +1257,19 @@ export default function App() {
         />
 
         {/* Mobile Backdrop when Inspector, Routing, or Stats Drawer is open */}
-        {(selectedStation || selectedConnection || sidebarTab === 'stats' || sidebarTab === 'routing') && (
+        {(selectedStation ||
+          selectedConnection ||
+          selectedImage ||
+          selectedText ||
+          sidebarTab === 'stats' ||
+          sidebarTab === 'routing') && (
           <div
             className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-2xs transition-opacity"
             onClick={() => {
               setSelectedStationId(null);
               setSelectedConnectionId(null);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
               setSidebarTab('inspector');
             }}
           />
@@ -1075,10 +1284,16 @@ export default function App() {
           lines={lines}
           connections={connections}
           recentColors={recentColors}
+          svgImages={svgImages}
+          svgTexts={svgTexts}
+          selectedImage={selectedImage}
+          selectedText={selectedText}
           onSelectStation={(id) => {
             setSelectedStationId(id);
             if (id) {
               setSelectedConnectionId(null);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
               setSelectedStationIds([id]);
             } else {
               setSelectedStationIds([]);
@@ -1089,6 +1304,26 @@ export default function App() {
             if (id) {
               setSelectedStationId(null);
               setSelectedStationIds([]);
+              setSelectedImageId(null);
+              setSelectedTextId(null);
+            }
+          }}
+          onSelectImage={(id) => {
+            setSelectedImageId(id);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+              setSelectedConnectionId(null);
+              setSelectedTextId(null);
+            }
+          }}
+          onSelectText={(id) => {
+            setSelectedTextId(id);
+            if (id) {
+              setSelectedStationId(null);
+              setSelectedStationIds([]);
+              setSelectedConnectionId(null);
+              setSelectedImageId(null);
             }
           }}
           onUpdateStation={handleUpdateStation}
@@ -1104,10 +1339,18 @@ export default function App() {
           onAutoBundleConnections={handleAutoBundleConnections}
           onUpdateStationZIndex={handleUpdateStationZIndex}
           onDeleteConnection={handleDeleteConnection}
+          onUpdateImage={handleUpdateImage}
+          onUpdateImageZIndex={handleUpdateImageZIndex}
+          onDeleteImage={handleDeleteImage}
+          onUpdateText={handleUpdateText}
+          onUpdateTextZIndex={handleUpdateTextZIndex}
+          onDeleteText={handleDeleteText}
           theme={effectiveTheme}
           onClose={() => {
             setSelectedStationId(null);
             setSelectedConnectionId(null);
+            setSelectedImageId(null);
+            setSelectedTextId(null);
             setSidebarTab('inspector');
           }}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}

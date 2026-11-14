@@ -78,6 +78,11 @@ export function normalizeOpacity(val: number): number {
   return Math.max(0.05, Math.min(1, Math.round(val * 100) / 100));
 }
 
+export function normalizeFontSize(val: number): number {
+  if (!Number.isFinite(val)) return 18;
+  return Math.max(4, Math.round(val));
+}
+
 export type StrokeStyle = 'solid' | 'dashed' | 'dotted' | 'double';
 export type LineCapStyle = 'round' | 'butt' | 'square';
 
@@ -139,8 +144,45 @@ export interface Connection {
   opacity?: number; // 階段三 SVG 自由變換：不透明度 (0.05 ~ 1，預設 1)
 }
 
+export interface CanvasImage {
+  id: string;
+  name: string;
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  rotation?: number;
+  opacity?: number;
+  zIndex?: number;
+  preserveAspectRatio?: boolean;
+}
+
+export interface CanvasText {
+  id: string;
+  content: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  color: string;
+  fontWeight?: 'normal' | 'medium' | 'semibold' | 'bold';
+  textAnchor?: 'start' | 'middle' | 'end';
+  letterSpacing?: number;
+  hasHalo?: boolean;
+  scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  rotation?: number;
+  opacity?: number;
+  zIndex?: number;
+}
+
 export type ToolMode = 'select' | 'marquee_select' | 'pan' | 'add_station' | 'add_virtual_node' | 'connect';
 
 export type ThemeMode = 'dark' | 'light' | 'auto';
 export type EffectiveTheme = 'dark' | 'light';
+
 

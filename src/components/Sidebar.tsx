@@ -16,6 +16,9 @@ import {
   normalizeOpacity,
   StrokeStyle,
   LineCapStyle,
+  CanvasImage,
+  CanvasText,
+  normalizeFontSize,
 } from '../types/metro';
 import { ROUTE_TYPE_OPTIONS } from './Toolbar';
 import { NetworkStatsPanel } from './NetworkStatsPanel';
@@ -44,6 +47,15 @@ import {
   ChevronDown,
   ChevronUp,
   CopyPlus,
+  Type,
+  Upload,
+  Link as LinkIcon,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Lock,
+  Unlock,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { ShortestPathResult, PathAlgorithm, findShortestPath } from '../utils/pathfinding';
 
@@ -340,6 +352,18 @@ interface SidebarProps {
   onOpenShortcuts?: () => void;
   activeTab?: 'inspector' | 'stats' | 'routing';
   onTabChange?: (tab: 'inspector' | 'stats' | 'routing') => void;
+  svgImages?: CanvasImage[];
+  svgTexts?: CanvasText[];
+  selectedImage?: CanvasImage | null;
+  selectedText?: CanvasText | null;
+  onSelectImage?: (id: string | null) => void;
+  onSelectText?: (id: string | null) => void;
+  onUpdateImage?: (updated: CanvasImage) => void;
+  onUpdateImageZIndex?: (id: string, zIndex: number) => void;
+  onDeleteImage?: (id: string) => void;
+  onUpdateText?: (updated: CanvasText) => void;
+  onUpdateTextZIndex?: (id: string, zIndex: number) => void;
+  onDeleteText?: (id: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -377,6 +401,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onAddConnection,
   activeColor,
   activeRouteType,
+  svgImages = [],
+  svgTexts = [],
+  selectedImage = null,
+  selectedText = null,
+  onSelectImage,
+  onSelectText,
+  onUpdateImage,
+  onUpdateImageZIndex,
+  onDeleteImage,
+  onUpdateText,
+  onUpdateTextZIndex,
+  onDeleteText,
 }) => {
   const isLight = theme === 'light';
 
@@ -397,6 +433,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [connHexInput, setConnHexInput] = useState('');
   const [offsetInput, setOffsetInput] = useState('0');
   const [stationSearchQuery, setStationSearchQuery] = useState('');
+
+  const replaceImageInputRef = React.useRef<HTMLInputElement | null>(null);
+  const textContentRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const prevTextIdsRef = React.useRef<Set<string>>(new Set(svgTexts.map((t) => t.id)));
+
+  const [isReplaceUrlOpen, setIsReplaceUrlOpen] = useState(false);
+  const [replaceUrlInput, setReplaceUrlInput] = useState('');
+  const [replaceUrlError, setReplaceUrlError] = useState('');
+  const [textHexInput, setTextHexInput] = useState('#18181B');
 
   const getStationLinesAndColors = (st: Station) => {
     const stConns = connections.filter(
@@ -495,14 +540,127 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   useEffect(() => {
-    if ((selectedStation || selectedConnection) && currentTab === 'stats') {
+    if ((selectedStation || selectedConnection || selectedImage || selectedText) && currentTab === 'stats') {
       if (onTabChange) {
         onTabChange('inspector');
       } else {
         setInternalTab('inspector');
       }
     }
-  }, [selectedStation?.id, selectedConnection?.id]);
+  }, [selectedStation?.id, selectedConnection?.id, selectedImage?.id, selectedText?.id]);
+
+  useEffect(() => {
+    const prevIds = prevTextIdsRef.current;
+    const isBrandNewSelection = Boolean(selectedText && !prevIds.has(selectedText.id));
+    prevTextIdsRef.current = new Set(svgTexts.map((t) => t.id));
+
+    if (selectedText) {
+      setTextHexInput(selectedText.color || (isLight ? '#18181B' : '#F4F4F5'));
+      if (isBrandNewSelection) {
+        requestAnimationFrame(() => {
+          textContentRef.current?.focus();
+          textContentRef.current?.select();
+        });
+      }
+    }
+  }, [selectedText?.id, selectedText?.color, svgTexts, isLight]);
+
+  useEffect(() => {
+    setIsReplaceUrlOpen(false);
+    setReplaceUrlError('');
+  }, [selectedImage?.id]);
+
+  const measureAndProcessImage = (
+    src: string,
+    fileName: string,
+    onDone: (res: { src: string; name: string; width: number; height: number }) => void,
+    onError?: () => void
+  ) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const natW = img.naturalWidth > 0 ? img.naturalWidth : 200;
+      const natH = img.naturalHeight > 0 ? img.naturalHeight : 200;
+      const maxDim = 260;
+      const ratio = Math.min(1, maxDim / Math.max(natW, natH));
+      const width = Math.max(24, Math.round(natW * ratio));
+      const height = Math.max(24, Math.round(natH * ratio));
+      onDone({ src, name: fileName, width, height });
+    };
+    img.onerror = () => {
+      if (onError) {
+        onError();
+      } else {
+        onDone({ src, name: fileName, width: 200, height: 200 });
+      }
+    };
+    img.src = src;
+  };
+
+  const handleReplaceImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedImage) return;
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'SVG 圖片';
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      measureAndProcessImage(dataUrl, baseName, (res) => {
+        onUpdateImage?.({
+          ...selectedImage,
+          name: res.name,
+          src: res.src,
+          width: res.width,
+          height: res.height,
+        });
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleReplaceImageUrl = () => {
+    const raw = replaceUrlInput.trim();
+    if (!raw || (!raw.startsWith('http://') && !raw.startsWith('https://') && !raw.startsWith('data:image/'))) {
+      setReplaceUrlError('請輸入有效的 http(s) 或 data:image 圖片網址');
+      return;
+    }
+    setReplaceUrlError('');
+
+    const fallbackName = raw.startsWith('data:')
+      ? 'SVG 圖片'
+      : raw.split('/').pop()?.split('?')[0]?.slice(0, 28) || '遠端圖片';
+
+    measureAndProcessImage(
+      raw,
+      fallbackName,
+      (res) => {
+        if (selectedImage) {
+          onUpdateImage?.({
+            ...selectedImage,
+            src: res.src,
+            width: res.width,
+            height: res.height,
+          });
+          setReplaceUrlInput('');
+          setIsReplaceUrlOpen(false);
+        }
+      },
+      () => {
+        setReplaceUrlError('圖片載入失敗，請確認網址是否可存取');
+      }
+    );
+  };
+
+  const handleTextHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value.trim();
+    if (!val.startsWith('#') && val.length > 0) {
+      val = '#' + val;
+    }
+    setTextHexInput(val);
+    if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(val) && selectedText) {
+      onUpdateText?.({ ...selectedText, color: val.toUpperCase() });
+    }
+  };
 
   useEffect(() => {
     if (selectedConnection) {
@@ -527,7 +685,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const isMobileOpen = Boolean(
-    selectedStation || selectedConnection || currentTab === 'stats' || currentTab === 'routing'
+    selectedStation ||
+      selectedConnection ||
+      selectedImage ||
+      selectedText ||
+      currentTab === 'stats' ||
+      currentTab === 'routing'
   );
 
   return (
@@ -1105,6 +1268,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
           </div>
+
+          {/* Hidden file input for replacing selected SVG Image */}
+          <input
+            ref={replaceImageInputRef}
+            type="file"
+            accept="image/*,.svg"
+            className="hidden"
+            onChange={handleReplaceImageFileSelect}
+          />
 
           {/* Inspector Quick Shortest-Path Accordion */}
           <div className={`border-b ${borderCol}`}>
@@ -3147,9 +3319,996 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* Default State: Overview & Quick Station Directory */}
-          {!selectedStation && !selectedConnection && (
+          {/* 4. SVG Image Inspector */}
+          {selectedImage && !selectedStation && !selectedConnection && (
+            <div className={`divide-y text-xs ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+              {/* Header */}
+              <div className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className={`w-4 h-4 ${textMuted}`} />
+                  <h2 className={`font-semibold text-sm ${textHeading}`}>SVG 圖片設定</h2>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onDeleteImage?.(selectedImage.id)}
+                    className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded transition-colors cursor-pointer"
+                    title="刪除此圖片"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  {onClose && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className={`p-1.5 rounded transition-colors cursor-pointer ${textMuted}`}
+                      title="關閉面板"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Name & Replace Source */}
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className={`block font-medium mb-1 ${textMuted}`}>圖片名稱</label>
+                  <input
+                    type="text"
+                    value={selectedImage.name}
+                    onChange={(e) =>
+                      onUpdateImage?.({ ...selectedImage, name: e.target.value })
+                    }
+                    className={`w-full px-3 py-1.5 rounded-md text-sm border focus:outline-none ${inputCls}`}
+                    placeholder="輸入圖層名稱"
+                  />
+                </div>
+
+                <div className={`flex items-center justify-between font-mono text-[11px] tabular-nums ${textMuted}`}>
+                  <span>畫布坐標</span>
+                  <span className={textHeading}>X: {selectedImage.x}, Y: {selectedImage.y}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => replaceImageInputRef.current?.click()}
+                    className={`flex-1 py-1.5 px-2.5 rounded-md border text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${btnInactive}`}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>更換本機圖片</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsReplaceUrlOpen((prev) => !prev);
+                      setReplaceUrlError('');
+                    }}
+                    className={`py-1.5 px-2.5 rounded-md border text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                      isReplaceUrlOpen ? btnActive : btnInactive
+                    }`}
+                  >
+                    <LinkIcon className="w-3.5 h-3.5" />
+                    <span>網址</span>
+                  </button>
+                </div>
+
+                {isReplaceUrlOpen && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="url"
+                        value={replaceUrlInput}
+                        onChange={(e) => {
+                          setReplaceUrlInput(e.target.value);
+                          if (replaceUrlError) setReplaceUrlError('');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleReplaceImageUrl();
+                          if (e.key === 'Escape') setIsReplaceUrlOpen(false);
+                        }}
+                        placeholder="https://... 替換圖片網址"
+                        className={`flex-1 px-2 py-1 text-xs rounded-md border focus:outline-none ${inputCls}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleReplaceImageUrl}
+                        className={`px-2 py-1 rounded-md text-xs border cursor-pointer shrink-0 ${btnActive}`}
+                      >
+                        套用
+                      </button>
+                    </div>
+                    {replaceUrlError && (
+                      <p className="text-[11px] text-rose-500">{replaceUrlError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Base Dimensions & Aspect Ratio Lock */}
+              <div className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className={`font-semibold ${textHeading}`}>基礎尺寸</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateImage?.({
+                        ...selectedImage,
+                        preserveAspectRatio: selectedImage.preserveAspectRatio === false,
+                      })
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition-colors cursor-pointer ${
+                      selectedImage.preserveAspectRatio !== false ? btnActive : btnInactive
+                    }`}
+                  >
+                    {selectedImage.preserveAspectRatio !== false ? (
+                      <Lock className="w-3 h-3" />
+                    ) : (
+                      <Unlock className="w-3 h-3" />
+                    )}
+                    <span>{selectedImage.preserveAspectRatio !== false ? '鎖定比例' : '自由拉伸'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className={textMuted}>寬度</span>
+                      <span className="font-mono tabular-nums">{Math.round(selectedImage.width)}</span>
+                    </div>
+                    <input
+                      type="number"
+                      min={8}
+                      step={1}
+                      value={Math.round(selectedImage.width)}
+                      onChange={(e) => {
+                        const nextW = Math.max(8, Math.round(parseFloat(e.target.value) || 8));
+                        if (selectedImage.preserveAspectRatio !== false && selectedImage.width > 0) {
+                          const ratio = selectedImage.height / selectedImage.width;
+                          onUpdateImage?.({
+                            ...selectedImage,
+                            width: nextW,
+                            height: Math.max(8, Math.round(nextW * ratio)),
+                          });
+                        } else {
+                          onUpdateImage?.({ ...selectedImage, width: nextW });
+                        }
+                      }}
+                      className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className={textMuted}>高度</span>
+                      <span className="font-mono tabular-nums">{Math.round(selectedImage.height)}</span>
+                    </div>
+                    <input
+                      type="number"
+                      min={8}
+                      step={1}
+                      value={Math.round(selectedImage.height)}
+                      onChange={(e) => {
+                        const nextH = Math.max(8, Math.round(parseFloat(e.target.value) || 8));
+                        if (selectedImage.preserveAspectRatio !== false && selectedImage.height > 0) {
+                          const ratio = selectedImage.width / selectedImage.height;
+                          onUpdateImage?.({
+                            ...selectedImage,
+                            height: nextH,
+                            width: Math.max(8, Math.round(nextH * ratio)),
+                          });
+                        } else {
+                          onUpdateImage?.({ ...selectedImage, height: nextH });
+                        }
+                      }}
+                      className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Z-Order */}
+              {onUpdateImageZIndex && (
+                <div className="p-4">
+                  <ZOrderControl
+                    value={selectedImage.zIndex ?? -1}
+                    onChange={(nextZ) => onUpdateImageZIndex(selectedImage.id, nextZ)}
+                    targetType="image"
+                    theme={theme}
+                  />
+                </div>
+              )}
+
+              {/* SVG Image Free Transform */}
+              {(() => {
+                const curScale = selectedImage.scale ?? 1;
+                const curScaleX = selectedImage.scaleX ?? 1;
+                const curScaleY = selectedImage.scaleY ?? 1;
+                const curRot = selectedImage.rotation ?? 0;
+                const curOpacity = selectedImage.opacity ?? 1;
+                const isModified =
+                  curScale !== 1 || curScaleX !== 1 || curScaleY !== 1 || curRot !== 0 || curOpacity !== 1;
+                const scaleMax = Math.max(4, Math.ceil(curScale + 1));
+
+                return (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold ${textHeading}`}>SVG 自由變換</span>
+                      {isModified && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateImage?.({
+                              ...selectedImage,
+                              scale: 1,
+                              scaleX: 1,
+                              scaleY: 1,
+                              rotation: 0,
+                              opacity: 1,
+                            })
+                          }
+                          className={`text-[11px] underline cursor-pointer ${textMuted}`}
+                        >
+                          重設預設
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>整體縮放</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step={0.1}
+                            min={0.1}
+                            value={curScale}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (Number.isFinite(v)) {
+                                onUpdateImage?.({ ...selectedImage, scale: normalizeSvgScale(v, 0.1) });
+                              }
+                            }}
+                            className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                          />
+                          <span className={`font-mono text-[10px] ${textMuted}`}>×</span>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={scaleMax}
+                        step={0.05}
+                        value={Math.min(scaleMax, curScale)}
+                        onChange={(e) =>
+                          onUpdateImage?.({
+                            ...selectedImage,
+                            scale: normalizeSvgScale(parseFloat(e.target.value), 0.1),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0.25, 0.5, 1, 1.5, 2].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => onUpdateImage?.({ ...selectedImage, scale: preset })}
+                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                              curScale === preset ? btnActive : btnInactive
+                            }`}
+                          >
+                            {preset}×
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className={textMuted}>水平 X 拉伸</span>
+                          <span className="font-mono font-semibold tabular-nums">{curScaleX}×</span>
+                        </div>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0.1}
+                          value={curScaleX}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) {
+                              onUpdateImage?.({ ...selectedImage, scaleX: normalizeSvgScale(v, 0.1) });
+                            }
+                          }}
+                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className={textMuted}>垂直 Y 拉伸</span>
+                          <span className="font-mono font-semibold tabular-nums">{curScaleY}×</span>
+                        </div>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0.1}
+                          value={curScaleY}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) {
+                              onUpdateImage?.({ ...selectedImage, scaleY: normalizeSvgScale(v, 0.1) });
+                            }
+                          }}
+                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>旋轉角度</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={curRot}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (Number.isFinite(v)) {
+                                onUpdateImage?.({ ...selectedImage, rotation: normalizeSvgAngle(v) });
+                              }
+                            }}
+                            className={`w-14 px-1 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                          />
+                          <span className={`font-mono ${textMuted}`}>°</span>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={359}
+                        step={1}
+                        value={curRot}
+                        onChange={(e) =>
+                          onUpdateImage?.({
+                            ...selectedImage,
+                            rotation: normalizeSvgAngle(parseFloat(e.target.value)),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0, 45, 90, 180, 270].map((deg) => (
+                          <button
+                            key={deg}
+                            type="button"
+                            onClick={() => onUpdateImage?.({ ...selectedImage, rotation: deg })}
+                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                              curRot === deg ? btnActive : btnInactive
+                            }`}
+                          >
+                            {deg}°
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className={textMuted}>不透明度</span>
+                        <span className="font-mono font-semibold tabular-nums">
+                          {Math.round(curOpacity * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.05}
+                        max={1}
+                        step={0.05}
+                        value={curOpacity}
+                        onChange={(e) =>
+                          onUpdateImage?.({
+                            ...selectedImage,
+                            opacity: normalizeOpacity(parseFloat(e.target.value)),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* 5. SVG Text Inspector */}
+          {selectedText && !selectedStation && !selectedConnection && !selectedImage && (
+            <div className={`divide-y text-xs ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+              {/* Header */}
+              <div className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Type className={`w-4 h-4 ${textMuted}`} />
+                  <h2 className={`font-semibold text-sm ${textHeading}`}>SVG 文字設定</h2>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onDeleteText?.(selectedText.id)}
+                    className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded transition-colors cursor-pointer"
+                    title="刪除此文字"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  {onClose && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className={`p-1.5 rounded transition-colors cursor-pointer ${textMuted}`}
+                      title="關閉面板"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Content & Position */}
+              <div className="p-4 space-y-2.5">
+                <div>
+                  <label className={`block font-medium mb-1 ${textMuted}`}>文字內容 (支援換行)</label>
+                  <textarea
+                    ref={textContentRef}
+                    rows={3}
+                    value={selectedText.content}
+                    onChange={(e) =>
+                      onUpdateText?.({ ...selectedText, content: e.target.value })
+                    }
+                    className={`w-full px-3 py-2 rounded-md text-sm border focus:outline-none resize-y ${inputCls}`}
+                    placeholder="輸入標註文字..."
+                  />
+                </div>
+                <div className={`flex items-center justify-between font-mono text-[11px] tabular-nums ${textMuted}`}>
+                  <span>畫布坐標</span>
+                  <span className={textHeading}>X: {selectedText.x}, Y: {selectedText.y}</span>
+                </div>
+              </div>
+
+              {/* Typography Controls */}
+              {(() => {
+                const curSize = normalizeFontSize(selectedText.fontSize);
+                const sizeMax = Math.max(72, curSize + 24);
+                const curWeight = selectedText.fontWeight || 'semibold';
+                const curAnchor = selectedText.textAnchor || 'middle';
+                const curSpacing = selectedText.letterSpacing ?? 0;
+                const curHalo = selectedText.hasHalo !== false;
+
+                return (
+                  <div className="p-4 space-y-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>文字大小</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateText?.({
+                                ...selectedText,
+                                fontSize: normalizeFontSize(curSize - 2),
+                              })
+                            }
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
+                          >
+                            -2
+                          </button>
+                          <input
+                            type="number"
+                            min={4}
+                            step={1}
+                            value={curSize}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (Number.isFinite(v)) {
+                                onUpdateText?.({
+                                  ...selectedText,
+                                  fontSize: normalizeFontSize(v),
+                                });
+                              }
+                            }}
+                            className={`w-14 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateText?.({
+                                ...selectedText,
+                                fontSize: normalizeFontSize(curSize + 2),
+                              })
+                            }
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
+                          >
+                            +2
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={8}
+                        max={sizeMax}
+                        step={1}
+                        value={curSize}
+                        onChange={(e) =>
+                          onUpdateText?.({
+                            ...selectedText,
+                            fontSize: normalizeFontSize(parseFloat(e.target.value)),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                      <div className="grid grid-cols-6 gap-1">
+                        {[12, 16, 20, 28, 36, 48].map((sz) => (
+                          <button
+                            key={sz}
+                            type="button"
+                            onClick={() => onUpdateText?.({ ...selectedText, fontSize: sz })}
+                            className={`py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                              curSize === sz ? btnActive : btnInactive
+                            }`}
+                          >
+                            {sz}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className={`text-[11px] block mb-1.5 ${textMuted}`}>字重</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(
+                          [
+                            { id: 'normal', label: '細' },
+                            { id: 'medium', label: '中' },
+                            { id: 'semibold', label: '半粗' },
+                            { id: 'bold', label: '粗' },
+                          ] as const
+                        ).map((w) => (
+                          <button
+                            key={w.id}
+                            type="button"
+                            onClick={() => onUpdateText?.({ ...selectedText, fontWeight: w.id })}
+                            className={`py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                              curWeight === w.id ? btnActive : btnInactive
+                            }`}
+                          >
+                            {w.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className={`text-[11px] block mb-1.5 ${textMuted}`}>對齊方式</span>
+                      <div className="grid grid-cols-3 gap-1">
+                        {(
+                          [
+                            { id: 'start', label: '左對齊', Icon: AlignLeft },
+                            { id: 'middle', label: '居中', Icon: AlignCenter },
+                            { id: 'end', label: '右對齊', Icon: AlignRight },
+                          ] as const
+                        ).map(({ id, label, Icon }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => onUpdateText?.({ ...selectedText, textAnchor: id })}
+                            className={`py-1.5 px-2 rounded-md text-[11px] border flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                              curAnchor === id ? btnActive : btnInactive
+                            }`}
+                          >
+                            <Icon className="w-3 h-3" />
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>字距</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          value={curSpacing}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) {
+                              onUpdateText?.({
+                                ...selectedText,
+                                letterSpacing: Math.round(v * 2) / 2,
+                              });
+                            }
+                          }}
+                          className={`w-14 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min={-2}
+                        max={20}
+                        step={0.5}
+                        value={Math.max(-2, Math.min(20, curSpacing))}
+                        onChange={(e) =>
+                          onUpdateText?.({
+                            ...selectedText,
+                            letterSpacing: parseFloat(e.target.value),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <div className={`font-medium ${textHeading}`}>文字外框描邊</div>
+                        <div className={`text-[10px] ${textMuted}`}>跨越路線時提升可讀性</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateText?.({ ...selectedText, hasHalo: !curHalo })}
+                        className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                          curHalo ? btnActive : btnInactive
+                        }`}
+                      >
+                        {curHalo ? '已開啟' : '已關閉'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Text Color Picker */}
+              <div className="p-4 space-y-2.5">
+                <label className={`block font-medium ${textMuted}`}>文字色彩</label>
+                <div className={`flex items-center gap-2 p-1.5 rounded-md border ${surfaceSubtle}`}>
+                  <input
+                    type="color"
+                    value={selectedText.color || (isLight ? '#18181B' : '#F4F4F5')}
+                    onChange={(e) => {
+                      const newCol = e.target.value.toUpperCase();
+                      setTextHexInput(newCol);
+                      onUpdateText?.({ ...selectedText, color: newCol });
+                    }}
+                    className="w-7 h-7 rounded cursor-pointer bg-transparent border-0 p-0"
+                    title="選擇文字色彩"
+                  />
+                  <div className="flex items-center gap-1 flex-1">
+                    <Hash className={`w-3.5 h-3.5 ${textMuted}`} />
+                    <input
+                      type="text"
+                      value={textHexInput}
+                      onChange={handleTextHexChange}
+                      maxLength={7}
+                      className={`bg-transparent font-mono uppercase font-semibold focus:outline-none w-full text-xs ${textHeading}`}
+                      placeholder="#18181B"
+                    />
+                  </div>
+                </div>
+
+                {recentColors.length > 0 && (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {recentColors.slice(0, 15).map((color, idx) => (
+                      <button
+                        key={`txt-col-${color}-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setTextHexInput(color);
+                          onUpdateText?.({ ...selectedText, color });
+                        }}
+                        className="w-full h-5 rounded hover:scale-105 transition-transform border border-black/20 cursor-pointer"
+                        style={{ backgroundColor: color }}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Z-Order */}
+              {onUpdateTextZIndex && (
+                <div className="p-4">
+                  <ZOrderControl
+                    value={selectedText.zIndex ?? 1}
+                    onChange={(nextZ) => onUpdateTextZIndex(selectedText.id, nextZ)}
+                    targetType="text"
+                    theme={theme}
+                  />
+                </div>
+              )}
+
+              {/* SVG Text Free Transform */}
+              {(() => {
+                const curScale = selectedText.scale ?? 1;
+                const curScaleX = selectedText.scaleX ?? 1;
+                const curScaleY = selectedText.scaleY ?? 1;
+                const curRot = selectedText.rotation ?? 0;
+                const curOpacity = selectedText.opacity ?? 1;
+                const isModified =
+                  curScale !== 1 || curScaleX !== 1 || curScaleY !== 1 || curRot !== 0 || curOpacity !== 1;
+                const scaleMax = Math.max(4, Math.ceil(curScale + 1));
+
+                return (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold ${textHeading}`}>SVG 自由變換</span>
+                      {isModified && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateText?.({
+                              ...selectedText,
+                              scale: 1,
+                              scaleX: 1,
+                              scaleY: 1,
+                              rotation: 0,
+                              opacity: 1,
+                            })
+                          }
+                          className={`text-[11px] underline cursor-pointer ${textMuted}`}
+                        >
+                          重設預設
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>整體縮放</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step={0.1}
+                            min={0.1}
+                            value={curScale}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (Number.isFinite(v)) {
+                                onUpdateText?.({ ...selectedText, scale: normalizeSvgScale(v, 0.1) });
+                              }
+                            }}
+                            className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                          />
+                          <span className={`font-mono text-[10px] ${textMuted}`}>×</span>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={scaleMax}
+                        step={0.05}
+                        value={Math.min(scaleMax, curScale)}
+                        onChange={(e) =>
+                          onUpdateText?.({
+                            ...selectedText,
+                            scale: normalizeSvgScale(parseFloat(e.target.value), 0.1),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0.5, 1, 1.5, 2, 3].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => onUpdateText?.({ ...selectedText, scale: preset })}
+                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                              curScale === preset ? btnActive : btnInactive
+                            }`}
+                          >
+                            {preset}×
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className={textMuted}>水平 X 拉伸</span>
+                          <span className="font-mono font-semibold tabular-nums">{curScaleX}×</span>
+                        </div>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0.1}
+                          value={curScaleX}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) {
+                              onUpdateText?.({ ...selectedText, scaleX: normalizeSvgScale(v, 0.1) });
+                            }
+                          }}
+                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className={textMuted}>垂直 Y 拉伸</span>
+                          <span className="font-mono font-semibold tabular-nums">{curScaleY}×</span>
+                        </div>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0.1}
+                          value={curScaleY}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) {
+                              onUpdateText?.({ ...selectedText, scaleY: normalizeSvgScale(v, 0.1) });
+                            }
+                          }}
+                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={textMuted}>旋轉角度</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={curRot}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (Number.isFinite(v)) {
+                                onUpdateText?.({ ...selectedText, rotation: normalizeSvgAngle(v) });
+                              }
+                            }}
+                            className={`w-14 px-1 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                          />
+                          <span className={`font-mono ${textMuted}`}>°</span>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={359}
+                        step={1}
+                        value={curRot}
+                        onChange={(e) =>
+                          onUpdateText?.({
+                            ...selectedText,
+                            rotation: normalizeSvgAngle(parseFloat(e.target.value)),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0, 45, 90, 180, 270].map((deg) => (
+                          <button
+                            key={deg}
+                            type="button"
+                            onClick={() => onUpdateText?.({ ...selectedText, rotation: deg })}
+                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                              curRot === deg ? btnActive : btnInactive
+                            }`}
+                          >
+                            {deg}°
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className={textMuted}>不透明度</span>
+                        <span className="font-mono font-semibold tabular-nums">
+                          {Math.round(curOpacity * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.05}
+                        max={1}
+                        step={0.05}
+                        value={curOpacity}
+                        onChange={(e) =>
+                          onUpdateText?.({
+                            ...selectedText,
+                            opacity: normalizeOpacity(parseFloat(e.target.value)),
+                          })
+                        }
+                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Default State: Overview & Quick Directory */}
+          {!selectedStation && !selectedConnection && !selectedImage && !selectedText && (
             <div className={`divide-y text-xs leading-relaxed ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+              {(svgImages.length > 0 || svgTexts.length > 0) && (
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className={`font-semibold ${textHeading}`}>
+                      圖片與文字清單 ({svgImages.length + svgTexts.length})
+                    </span>
+                    <span className={`text-[10px] ${textMuted}`}>點擊選取</span>
+                  </div>
+                  <div
+                    className={`max-h-44 overflow-y-auto divide-y border rounded-lg ${borderCol} ${
+                      isLight ? 'divide-zinc-100' : 'divide-zinc-800/70'
+                    }`}
+                  >
+                    {svgImages.map((img) => (
+                      <div
+                        key={img.id}
+                        className={`flex items-center justify-between px-2.5 py-2 transition-colors ${
+                          isLight ? 'hover:bg-zinc-50 text-zinc-800' : 'hover:bg-zinc-900/60 text-zinc-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectImage?.(img.id)}
+                          className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="text-xs font-medium truncate">
+                            {img.name || 'SVG 圖片'}
+                          </span>
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
+                            Z{(img.zIndex ?? -1) > 0 ? `+${img.zIndex ?? -1}` : img.zIndex ?? -1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteImage?.(img.id)}
+                            className="p-1 text-zinc-400 hover:text-rose-500 rounded cursor-pointer"
+                            title="刪除圖片"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {svgTexts.map((txt) => (
+                      <div
+                        key={txt.id}
+                        className={`flex items-center justify-between px-2.5 py-2 transition-colors ${
+                          isLight ? 'hover:bg-zinc-50 text-zinc-800' : 'hover:bg-zinc-900/60 text-zinc-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectText?.(txt.id)}
+                          className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                        >
+                          <Type className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="text-xs font-medium truncate">
+                            {txt.content.trim().split('\n')[0] || '空白文字'}
+                          </span>
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
+                            Z{(txt.zIndex ?? 1) > 0 ? `+${txt.zIndex ?? 1}` : txt.zIndex ?? 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteText?.(txt.id)}
+                            className="p-1 text-zinc-400 hover:text-rose-500 rounded cursor-pointer"
+                            title="刪除文字"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {stations.length > 0 && (
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
