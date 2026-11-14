@@ -83,7 +83,38 @@ export function normalizeFontSize(val: number): number {
   return Math.max(4, Math.round(val));
 }
 
-export type StrokeStyle = 'solid' | 'dashed' | 'dotted' | 'double';
+export type StationStyle = 'default' | 'beijing' | 'shanghai' | 'guangzhou';
+
+export type StationVariant =
+  | 'auto'
+  | 'shanghai_basic'
+  | 'shanghai_2020'
+  | 'shanghai_interchange'
+  | 'shanghai_suburban'
+  | 'guangzhou_basic'
+  | 'guangzhou_interchange'
+  | 'guangzhou_interchange_2024'
+  | 'beijing_basic'
+  | 'beijing_interchange';
+
+export interface GuangzhouBadgeItem {
+  line: string;
+  number: string;
+  color?: string;
+}
+
+export type StrokeStyle =
+  | 'solid'
+  | 'dashed'
+  | 'dotted'
+  | 'double'
+  | 'beijing_cased'
+  | 'beijing_rail'
+  | 'shanghai_metro'
+  | 'shanghai_maglev'
+  | 'guangzhou_metro'
+  | 'guangzhou_intercity';
+
 export type LineCapStyle = 'round' | 'butt' | 'square';
 
 export interface Station {
@@ -93,6 +124,10 @@ export interface Station {
   x: number;
   y: number;
   type: StationType;
+  stationStyle?: StationStyle; // 站點城市樣式：'default' | 'beijing' | 'shanghai' | 'guangzhou'
+  stationVariant?: StationVariant; // 指定精確地鐵公司站點圖示樣式
+  stationColor?: string; // 站點 SVG 自訂顏色
+  gzBadges?: GuangzhouBadgeItem[]; // 廣州站點內嵌可編輯路線與車站編號及顏色
   interchangeStyle?: InterchangeStyle; // 換乘站風格：'dots' (色點陣列) | 'pie' (輪盤扇形) | 'capsule' (連鎖膠囊)
   interchangeLinesCount?: number; // 自訂換乘路線數量 (無限制，留空則自動偵測交會線路數)
   labelPosition?: LabelPosition;

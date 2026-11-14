@@ -17,8 +17,11 @@ import {
   clampLineOffset,
   normalizeSvgScale,
   normalizeSvgAngle,
-  normalizeStrokeWidth
+  normalizeStrokeWidth,
+  StationStyle,
+  StationVariant
 } from '../types/metro';
+import { CityStationSymbol, resolveEffectiveStationVariant } from './CityStationSymbol';
 import { 
   snapToGrid, 
   getMetroPath, 
@@ -114,6 +117,8 @@ interface MetroCanvasProps {
   onDeleteSelected: () => void;
   onRecordHistory?: () => void;
   theme?: EffectiveTheme;
+  defaultStationStyle?: StationStyle;
+  defaultStationVariant?: StationVariant;
   shortestPathResult?: ShortestPathResult | null;
   showShortestPathPreview?: boolean;
 }
@@ -162,6 +167,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   onDeleteSelected,
   onRecordHistory,
   theme = 'dark',
+  defaultStationStyle = 'default',
+  defaultStationVariant = 'auto',
   shortestPathResult,
   showShortestPathPreview = true,
 }) => {
@@ -1786,13 +1793,20 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             const pos = screenToWorld(downInfo.clientX, downInfo.clientY);
             const regularCount = stations.filter((s) => !s.isVirtual).length;
             const newStationIndex = regularCount + 1;
+            const isInterchangeVariant =
+              defaultStationVariant === 'shanghai_interchange' ||
+              defaultStationVariant === 'guangzhou_interchange' ||
+              defaultStationVariant === 'guangzhou_interchange_2024' ||
+              defaultStationVariant === 'beijing_interchange';
             const newStation: Station = {
               id: `st-${Date.now()}`,
               name: `${t('app.defaultStationPrefix')} ${newStationIndex}`,
               code: `S${newStationIndex}`,
               x: pos.x,
               y: pos.y,
-              type: 'regular',
+              type: isInterchangeVariant ? 'interchange' : 'regular',
+              stationStyle: defaultStationStyle,
+              ...(defaultStationVariant !== 'auto' ? { stationVariant: defaultStationVariant } : {}),
               labelPosition: 'top',
               isVirtual: false,
             };
@@ -1841,13 +1855,20 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               } else {
                 const regularCount = stations.filter((s) => !s.isVirtual).length;
                 const newStationIndex = regularCount + 1;
+                const isInterchangeVar =
+                  defaultStationVariant === 'shanghai_interchange' ||
+                  defaultStationVariant === 'guangzhou_interchange' ||
+                  defaultStationVariant === 'guangzhou_interchange_2024' ||
+                  defaultStationVariant === 'beijing_interchange';
                 const newStation: Station = {
                   id: `st-${Date.now()}`,
                   name: `${t('app.defaultStationPrefix')} ${newStationIndex}`,
                   code: `S${newStationIndex}`,
                   x: eqGuide.targetPos.x,
                   y: eqGuide.targetPos.y,
-                  type: 'regular',
+                  type: isInterchangeVar ? 'interchange' : 'regular',
+                  stationStyle: defaultStationStyle,
+                  ...(defaultStationVariant !== 'auto' ? { stationVariant: defaultStationVariant } : {}),
                   labelPosition: 'top',
                   isVirtual: false,
                 };
@@ -2695,6 +2716,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   ? `${Math.max(6, lineWidth * 2)} ${Math.max(4, lineWidth * 1.3)}`
                   : strokeStyle === 'dotted'
                   ? `0.1 ${Math.max(6, lineWidth * 1.8)}`
+                  : strokeStyle === 'guangzhou_intercity'
+                  ? `${Math.max(11, lineWidth * 2.4)} ${Math.max(4, lineWidth * 0.9)} ${Math.max(2, lineWidth * 0.45)} ${Math.max(4, lineWidth * 0.9)}`
                   : undefined;
 
               const pathData = getMetroPath(
@@ -2710,6 +2733,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 conn.angleB,
                 conn.offset ?? 0
               );
+
+              const contrastBg = isLight ? '#FFFFFF' : '#09090B';
+              const trackCutoutBg = isLight ? '#F8FAFC' : '#020617';
 
               return (
                 <g
@@ -2759,29 +2785,117 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       className="export-ignore"
                     />
                   )}
+
+                  {/* City outer casing / halo underlays */}
+                  {strokeStyle === 'guangzhou_metro' && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={lineColor}
+                      strokeWidth={lineWidth + 5}
+                      strokeLinecap={lineCap}
+                      strokeLinejoin="round"
+                      opacity={lineOpacity * 0.24}
+                      pointerEvents="none"
+                    />
+                  )}
+                  {(strokeStyle === 'beijing_cased' || strokeStyle === 'guangzhou_metro' || strokeStyle === 'guangzhou_intercity') && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={contrastBg}
+                      strokeWidth={lineWidth + (strokeStyle === 'beijing_cased' ? 3.8 : 2)}
+                      strokeLinecap={lineCap}
+                      strokeLinejoin="round"
+                      opacity={lineOpacity * (strokeStyle === 'beijing_cased' ? 0.96 : 0.88)}
+                      pointerEvents="none"
+                    />
+                  )}
+                  {strokeStyle === 'shanghai_metro' && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={contrastBg}
+                      strokeWidth={lineWidth + 2.2}
+                      strokeLinecap={lineCap}
+                      strokeLinejoin="round"
+                      opacity={lineOpacity * 0.92}
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Main line body */}
                   <path
                     d={pathData}
                     fill="none"
                     stroke={lineColor}
-                    strokeWidth={lineWidth}
+                    strokeWidth={
+                      strokeStyle === 'beijing_rail'
+                        ? lineWidth + 1.5
+                        : strokeStyle === 'shanghai_maglev'
+                        ? lineWidth + 2.4
+                        : lineWidth
+                    }
                     strokeLinecap={strokeStyle === 'dotted' ? 'round' : lineCap}
                     strokeLinejoin="round"
                     strokeDasharray={strokeDasharray}
                     opacity={lineOpacity}
                   />
+
                   {/* Inner cutout for double-track style */}
                   {strokeStyle === 'double' && (
                     <path
                       d={pathData}
                       fill="none"
-                      stroke={isLight ? '#F8FAFC' : '#020617'}
+                      stroke={trackCutoutBg}
                       strokeWidth={Math.max(1.5, lineWidth * 0.36)}
                       strokeLinecap={lineCap}
                       strokeLinejoin="round"
                       opacity={lineOpacity}
                       pointerEvents="none"
                     />
+                  )}
+
+                  {/* Beijing Airport/Suburban Rail: crisp dashed white inner ties */}
+                  {strokeStyle === 'beijing_rail' && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={contrastBg}
+                      strokeWidth={Math.max(1.8, lineWidth * 0.44)}
+                      strokeLinecap="butt"
+                      strokeLinejoin="round"
+                      strokeDasharray={`${Math.max(6, lineWidth * 1.4)} ${Math.max(5, lineWidth * 1.1)}`}
+                      opacity={lineOpacity * 0.96}
+                      pointerEvents="none"
+                    />
+                  )}
+
+                  {/* Shanghai Maglev: twin rails + center magnetic guide ticks */}
+                  {strokeStyle === 'shanghai_maglev' && (
+                    <>
+                      <path
+                        d={pathData}
+                        fill="none"
+                        stroke={trackCutoutBg}
+                        strokeWidth={Math.max(2.2, lineWidth * 0.56)}
+                        strokeLinecap={lineCap}
+                        strokeLinejoin="round"
+                        opacity={lineOpacity}
+                        pointerEvents="none"
+                      />
+                      <path
+                        d={pathData}
+                        fill="none"
+                        stroke={lineColor}
+                        strokeWidth={Math.max(0.9, lineWidth * 0.16)}
+                        strokeLinecap="butt"
+                        strokeLinejoin="round"
+                        strokeDasharray={`${Math.max(3, lineWidth * 0.7)} ${Math.max(4, lineWidth * 0.9)}`}
+                        opacity={lineOpacity * 0.9}
+                        pointerEvents="none"
+                      />
+                    </>
                   )}
                 </g>
               );
@@ -2909,6 +3023,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                           strokeLinecap="round"
                         />
                       </g>
+                    ) : st.stationVariant && st.stationVariant !== 'auto' ? (
+                      <CityStationSymbol
+                        variant={st.stationVariant}
+                        stationColor={st.stationColor}
+                        gzBadges={st.gzBadges}
+                        connectedColors={distinctColors}
+                        stationCode={st.code}
+                      />
                     ) : (st.type === 'interchange' || st.type === 'interchange_3line' || distinctColors.length >= 2) ? (
                       (() => {
                         const PALETTE = [
@@ -2940,7 +3062,20 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         }
 
                         const N = Math.max(2, colors.length);
+                        const cityVariant = resolveEffectiveStationVariant(st.stationStyle, 'interchange', st.stationVariant);
                         const iStyle = st.interchangeStyle || 'dots';
+
+                        if (cityVariant) {
+                          return (
+                            <CityStationSymbol
+                              variant={cityVariant}
+                              stationColor={st.stationColor}
+                              gzBadges={st.gzBadges}
+                              connectedColors={colors}
+                              stationCode={st.code}
+                            />
+                          );
+                        }
 
                         if (iStyle === 'pie') {
                           const rOuter = Math.max(13, 11 + Math.min(N, 12) * 0.7);
@@ -2949,7 +3084,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
                           return (
                             <g pointerEvents="none">
-                              <circle r={rOuter} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              <circle r={rOuter} fill="#ffffff" stroke={st.stationColor || '#0f172a'} strokeWidth={3.5} />
                               {colors.map((c, idx) => {
                                 const degStart = -90 + (idx * 360) / N;
                                 const degEnd = -90 + ((idx + 1) * 360) / N;
@@ -2969,7 +3104,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                                   </g>
                                 );
                               })}
-                              <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={1.2} />
+                              <circle r={rHub} fill="#ffffff" stroke={st.stationColor || '#0f172a'} strokeWidth={1.2} />
                             </g>
                           );
                         }
@@ -2990,7 +3125,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                                 height={capHeight}
                                 rx={capHeight / 2}
                                 fill="#ffffff"
-                                stroke="#0f172a"
+                                stroke={st.stationColor || '#0f172a'}
                                 strokeWidth={3.5}
                               />
                               <line
@@ -2998,7 +3133,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                                 y1={0}
                                 x2={halfSpan}
                                 y2={0}
-                                stroke="#0f172a"
+                                stroke={st.stationColor || '#0f172a'}
                                 strokeWidth={2}
                               />
                               {colors.map((c, idx) => {
@@ -3022,7 +3157,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         if (N === 2) {
                           return (
                             <g pointerEvents="none">
-                              <circle r={12} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              <circle r={12} fill="#ffffff" stroke={st.stationColor || '#0f172a'} strokeWidth={3.5} />
                               <circle cx={-3.8} cy={0} r={3.2} fill={colors[0]} />
                               <circle cx={3.8} cy={0} r={3.2} fill={colors[1]} />
                             </g>
@@ -3032,7 +3167,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         if (N === 3) {
                           return (
                             <g pointerEvents="none">
-                              <circle r={14} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                              <circle r={14} fill="#ffffff" stroke={st.stationColor || '#0f172a'} strokeWidth={3.5} />
                               <circle cx={0} cy={-5} r={3.2} fill={colors[0]} />
                               <circle cx={-4.5} cy={3.2} r={3.2} fill={colors[1]} />
                               <circle cx={4.5} cy={3.2} r={3.2} fill={colors[2]} />
@@ -3047,7 +3182,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
                         return (
                           <g pointerEvents="none">
-                            <circle r={rHub} fill="#ffffff" stroke="#0f172a" strokeWidth={3.5} />
+                            <circle r={rHub} fill="#ffffff" stroke={st.stationColor || '#0f172a'} strokeWidth={3.5} />
                             {colors.map((c, idx) => {
                               const deg = -90 + (idx * 360) / N;
                               const rad = (deg * Math.PI) / 180;
@@ -3068,26 +3203,58 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         );
                       })()
                     ) : st.type === 'terminal' ? (
-                      <g pointerEvents="none">
-                        <rect
-                          x={-8}
-                          y={-8}
-                          width={16}
-                          height={16}
-                          rx={3}
-                          fill="#ffffff"
-                          stroke="#0f172a"
-                          strokeWidth={3}
-                        />
-                        <circle r={3} fill={primaryColor} />
-                      </g>
+                      (() => {
+                        const cityVariant = resolveEffectiveStationVariant(st.stationStyle, 'terminal', st.stationVariant);
+                        if (cityVariant) {
+                          return (
+                            <CityStationSymbol
+                              variant={cityVariant}
+                              stationColor={st.stationColor}
+                              gzBadges={st.gzBadges}
+                              connectedColors={distinctColors}
+                              stationCode={st.code}
+                            />
+                          );
+                        }
+                        return (
+                          <g pointerEvents="none">
+                            <rect
+                              x={-8}
+                              y={-8}
+                              width={16}
+                              height={16}
+                              rx={3}
+                              fill="#ffffff"
+                              stroke={st.stationColor || '#0f172a'}
+                              strokeWidth={3}
+                            />
+                            <circle r={3} fill={st.stationColor || primaryColor} />
+                          </g>
+                        );
+                      })()
                     ) : (
-                      <circle
-                        r={7}
-                        fill="#ffffff"
-                        stroke="#0f172a"
-                        strokeWidth={2.5}
-                      />
+                      (() => {
+                        const cityVariant = resolveEffectiveStationVariant(st.stationStyle, 'regular', st.stationVariant);
+                        if (cityVariant) {
+                          return (
+                            <CityStationSymbol
+                              variant={cityVariant}
+                              stationColor={st.stationColor}
+                              gzBadges={st.gzBadges}
+                              connectedColors={distinctColors}
+                              stationCode={st.code}
+                            />
+                          );
+                        }
+                        return (
+                          <circle
+                            r={7}
+                            fill="#ffffff"
+                            stroke={st.stationColor || '#0f172a'}
+                            strokeWidth={2.5}
+                          />
+                        );
+                      })()
                     )}
                   </g>
 

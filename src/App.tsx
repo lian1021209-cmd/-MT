@@ -17,7 +17,11 @@ import {
   clampLineOffset,
   CanvasImage,
   CanvasText,
+  StationStyle,
+  StationVariant,
+  StrokeStyle,
 } from './types/metro';
+import { getCityFromVariant } from './components/CityStationSymbol';
 import { DEFAULT_LINES, DEMO_STATIONS, DEMO_CONNECTIONS } from './data/initialData';
 import { MetroCanvas } from './components/MetroCanvas';
 import { Toolbar } from './components/Toolbar';
@@ -352,6 +356,49 @@ export default function App() {
 
   // Active Route Type among the 5 styles
   const [activeRouteType, setActiveRouteType] = useState<RouteType>('135_bend');
+  const [defaultStationStyle, setDefaultStationStyle] = useState<StationStyle>(() => {
+    const saved = localStorage.getItem('metro_default_station_style');
+    if (saved === 'default' || saved === 'beijing' || saved === 'shanghai' || saved === 'guangzhou') {
+      return saved;
+    }
+    return 'default';
+  });
+  const [defaultStationVariant, setDefaultStationVariant] = useState<StationVariant>(() => {
+    const saved = localStorage.getItem('metro_default_station_variant') as StationVariant | null;
+    if (
+      saved === 'auto' ||
+      saved === 'shanghai_basic' ||
+      saved === 'shanghai_2020' ||
+      saved === 'shanghai_interchange' ||
+      saved === 'shanghai_suburban' ||
+      saved === 'guangzhou_basic' ||
+      saved === 'guangzhou_interchange' ||
+      saved === 'guangzhou_interchange_2024' ||
+      saved === 'beijing_basic' ||
+      saved === 'beijing_interchange'
+    ) {
+      return saved;
+    }
+    return 'auto';
+  });
+  const [defaultStrokeStyle, setDefaultStrokeStyle] = useState<StrokeStyle>(() => {
+    const saved = localStorage.getItem('metro_default_stroke_style') as StrokeStyle | null;
+    if (
+      saved === 'solid' ||
+      saved === 'dashed' ||
+      saved === 'dotted' ||
+      saved === 'double' ||
+      saved === 'beijing_cased' ||
+      saved === 'beijing_rail' ||
+      saved === 'shanghai_metro' ||
+      saved === 'shanghai_maglev' ||
+      saved === 'guangzhou_metro' ||
+      saved === 'guangzhou_intercity'
+    ) {
+      return saved;
+    }
+    return 'solid';
+  });
 
   // Tool Mode controlled by the Left Toolbar
   const [toolMode, setToolMode] = useState<ToolMode>('select');
@@ -539,6 +586,7 @@ export default function App() {
           : undefined,
       waypoints,
       offset: newOffset,
+      strokeStyle: defaultStrokeStyle,
     };
 
     const nextConnections = [...updatedExisting, newConn];
@@ -628,6 +676,142 @@ export default function App() {
   const handleUpdateConnectionStyleLive = (connId: string, patch: Partial<Connection>) => {
     setConnections((prev) =>
       prev.map((c) => (c.id === connId ? { ...c, ...patch } : c))
+    );
+  };
+
+  const getFlagshipStrokeStyle = (preset: StationStyle): StrokeStyle => {
+    if (preset === 'beijing') return 'beijing_cased';
+    if (preset === 'shanghai') return 'shanghai_metro';
+    if (preset === 'guangzhou') return 'guangzhou_metro';
+    return 'solid';
+  };
+
+  const handleSelectCityPreset = (preset: StationStyle) => {
+    const nextStroke = getFlagshipStrokeStyle(preset);
+    setDefaultStationStyle(preset);
+    setDefaultStationVariant('auto');
+    setDefaultStrokeStyle(nextStroke);
+    localStorage.setItem('metro_default_station_style', preset);
+    localStorage.setItem('metro_default_station_variant', 'auto');
+    localStorage.setItem('metro_default_stroke_style', nextStroke);
+  };
+
+  const handleSelectStationVariant = (variant: StationVariant) => {
+    setDefaultStationVariant(variant);
+    localStorage.setItem('metro_default_station_variant', variant);
+
+    if (variant !== 'auto') {
+      const city = getCityFromVariant(variant);
+      const nextStroke = getFlagshipStrokeStyle(city);
+      setDefaultStationStyle(city);
+      setDefaultStrokeStyle(nextStroke);
+      localStorage.setItem('metro_default_station_style', city);
+      localStorage.setItem('metro_default_stroke_style', nextStroke);
+    }
+
+    if (selectedStationId) {
+      const target = stations.find((s) => s.id === selectedStationId);
+      if (target && !target.isVirtual) {
+        const isInterchangeVar =
+          variant === 'shanghai_interchange' ||
+          variant === 'guangzhou_interchange' ||
+          variant === 'guangzhou_interchange_2024' ||
+          variant === 'beijing_interchange';
+        pushHistory();
+        setStations((prev) =>
+          prev.map((st) =>
+            st.id === selectedStationId
+              ? {
+                  ...st,
+                  stationVariant: variant === 'auto' ? undefined : variant,
+                  ...(variant !== 'auto'
+                    ? {
+                        stationStyle: getCityFromVariant(variant),
+                        type: isInterchangeVar ? 'interchange' : 'regular',
+                      }
+                    : {}),
+                }
+              : st
+          )
+        );
+      }
+    }
+  };
+
+  const handleChangeDefaultStrokeStyle = (style: StrokeStyle) => {
+    setDefaultStrokeStyle(style);
+    localStorage.setItem('metro_default_stroke_style', style);
+  };
+
+  const handleApplyCityPresetToAll = (preset: StationStyle) => {
+    const nextStroke = getFlagshipStrokeStyle(preset);
+    pushHistory();
+    setDefaultStationStyle(preset);
+    setDefaultStationVariant('auto');
+    setDefaultStrokeStyle(nextStroke);
+    localStorage.setItem('metro_default_station_style', preset);
+    localStorage.setItem('metro_default_station_variant', 'auto');
+    localStorage.setItem('metro_default_stroke_style', nextStroke);
+    setStations((prev) =>
+      prev.map((st) =>
+        st.isVirtual ? st : { ...st, stationStyle: preset, stationVariant: undefined }
+      )
+    );
+    setConnections((prev) =>
+      prev.map((c) => ({ ...c, strokeStyle: nextStroke }))
+    );
+  };
+
+  const handleApplyStationStyleToAll = (style: StationStyle) => {
+    pushHistory();
+    setDefaultStationStyle(style);
+    setDefaultStationVariant('auto');
+    localStorage.setItem('metro_default_station_style', style);
+    localStorage.setItem('metro_default_station_variant', 'auto');
+    setStations((prev) =>
+      prev.map((st) =>
+        st.isVirtual ? st : { ...st, stationStyle: style, stationVariant: undefined }
+      )
+    );
+  };
+
+  const handleApplyLineStyleToSameColor = (connId: string) => {
+    const source = connections.find((c) => c.id === connId);
+    if (!source) return;
+    const targetColor = (source.color || '').toUpperCase();
+    pushHistory();
+    setConnections((prev) =>
+      prev.map((c) =>
+        (c.color || '').toUpperCase() === targetColor
+          ? {
+              ...c,
+              strokeStyle: source.strokeStyle,
+              strokeWidth: source.strokeWidth,
+              cornerRadius: source.cornerRadius,
+              lineCap: source.lineCap,
+              opacity: source.opacity,
+            }
+          : c
+      )
+    );
+  };
+
+  const handleApplyLineStyleToAll = (connId: string) => {
+    const source = connections.find((c) => c.id === connId);
+    if (!source) return;
+    const nextStroke = source.strokeStyle ?? 'solid';
+    pushHistory();
+    setDefaultStrokeStyle(nextStroke);
+    localStorage.setItem('metro_default_stroke_style', nextStroke);
+    setConnections((prev) =>
+      prev.map((c) => ({
+        ...c,
+        strokeStyle: source.strokeStyle,
+        strokeWidth: source.strokeWidth,
+        cornerRadius: source.cornerRadius,
+        lineCap: source.lineCap,
+        opacity: source.opacity,
+      }))
     );
   };
 
@@ -1121,7 +1305,7 @@ export default function App() {
 
       {/* Main Workspace: Left Toolbar + Infinite Canvas + Right Inspector Sidebar */}
       <div className="flex flex-1 min-h-0 relative">
-        {/* Left Toolbar: Select, Create Node, Virtual Node, Connect Nodes (with 5-style flyout), SVG Image & Text, and Active Color */}
+        {/* Left Toolbar: Select, Create Node, Virtual Node, Connect Nodes, Media, City Styles, Show More (Scrollable) */}
         <LeftToolbar
           toolMode={toolMode}
           onSetToolMode={(mode) => {
@@ -1140,6 +1324,22 @@ export default function App() {
           onAddImage={handleAddImage}
           onAddText={() => handleAddText()}
           theme={effectiveTheme}
+          defaultStationStyle={defaultStationStyle}
+          defaultStationVariant={defaultStationVariant}
+          defaultStrokeStyle={defaultStrokeStyle}
+          onSelectCityPreset={handleSelectCityPreset}
+          onSelectStationVariant={handleSelectStationVariant}
+          onApplyCityPresetToAll={handleApplyCityPresetToAll}
+          onChangeDefaultStrokeStyle={handleChangeDefaultStrokeStyle}
+          gridSnap={gridSnap}
+          onToggleGridSnap={() => setGridSnap((v) => !v)}
+          nodeAlign={nodeAlign}
+          onToggleNodeAlign={() => setNodeAlign((v) => !v)}
+          canUndo={past.length > 0}
+          onUndo={handleUndo}
+          canRedo={future.length > 0}
+          onRedo={handleRedo}
+          onOpenShortcuts={() => setIsShortcutsOpen(true)}
         />
 
         {/* Color Modal Window (~1/9th of the screen) containing 16,777,216 Spectrum, Hex Input & Recent 20 Colors */}
@@ -1264,6 +1464,8 @@ export default function App() {
           onDeleteSelected={handleDeleteSelected}
           onRecordHistory={pushHistory}
           theme={effectiveTheme}
+          defaultStationStyle={defaultStationStyle}
+          defaultStationVariant={defaultStationVariant}
           shortestPathResult={shortestPathResult}
           showShortestPathPreview={showPathPreview}
         />
@@ -1379,6 +1581,12 @@ export default function App() {
           onAddConnection={handleAddConnection}
           activeColor={activeColor}
           activeRouteType={activeRouteType}
+          defaultCityPreset={defaultStationStyle}
+          onSelectCityPreset={handleSelectCityPreset}
+          onApplyCityPresetToAll={handleApplyCityPresetToAll}
+          onApplyStationStyleToAll={handleApplyStationStyleToAll}
+          onApplyLineStyleToSameColor={handleApplyLineStyleToSameColor}
+          onApplyLineStyleToAll={handleApplyLineStyleToAll}
         />
       </div>
     </div>

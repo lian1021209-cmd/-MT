@@ -4,6 +4,9 @@ import {
   MetroLine,
   Connection,
   StationType,
+  StationStyle,
+  StationVariant,
+  GuangzhouBadgeItem,
   InterchangeStyle,
   RouteType,
   EffectiveTheme,
@@ -20,6 +23,12 @@ import {
   CanvasText,
   normalizeFontSize,
 } from '../types/metro';
+import {
+  CityStationSymbol,
+  resolveEffectiveStationVariant,
+  getCityFromVariant,
+  getDefaultGzBadges,
+} from './CityStationSymbol';
 import { getRouteTypeOptions } from './Toolbar';
 import { useI18n } from '../i18n/I18nContext';
 import { NetworkStatsPanel } from './NetworkStatsPanel';
@@ -371,6 +380,12 @@ interface SidebarProps {
   onUpdateTextZIndex?: (id: string, zIndex: number) => void;
   onDeleteText?: (id: string) => void;
   onRecordHistory?: () => void;
+  defaultCityPreset?: StationStyle;
+  onSelectCityPreset?: (preset: StationStyle) => void;
+  onApplyCityPresetToAll?: (preset: StationStyle) => void;
+  onApplyStationStyleToAll?: (style: StationStyle) => void;
+  onApplyLineStyleToSameColor?: (connId: string) => void;
+  onApplyLineStyleToAll?: (connId: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -424,6 +439,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateTextZIndex,
   onDeleteText,
   onRecordHistory,
+  defaultCityPreset = 'default',
+  onSelectCityPreset,
+  onApplyCityPresetToAll,
+  onApplyStationStyleToAll,
+  onApplyLineStyleToSameColor,
+  onApplyLineStyleToAll,
 }) => {
   const { t } = useI18n();
   const isLight = theme === 'light';
@@ -505,6 +526,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [replaceUrlInput, setReplaceUrlInput] = useState('');
   const [replaceUrlError, setReplaceUrlError] = useState('');
   const [textHexInput, setTextHexInput] = useState('#18181B');
+  const [stationHexInput, setStationHexInput] = useState('#18181B');
+  const [showMoreStation, setShowMoreStation] = useState(false);
+  const [showMoreConnection, setShowMoreConnection] = useState(false);
+  const [showMoreOverview, setShowMoreOverview] = useState(false);
 
   const getStationLinesAndColors = (st: Station) => {
     const stConns = connections.filter(
@@ -654,6 +679,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setDraftStationCode(selectedStation.code || '');
     }
   }, [selectedStation?.id, selectedStation?.code]);
+
+  useEffect(() => {
+    if (selectedStation) {
+      setStationHexInput(selectedStation.stationColor || '#18181B');
+    }
+  }, [selectedStation?.id, selectedStation?.stationColor]);
 
   useEffect(() => {
     isComposingImageNameRef.current = false;
@@ -869,7 +900,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         isMobileOpen
           ? 'fixed inset-x-0 bottom-0 max-h-[82vh] z-40 w-full rounded-t-xl shadow-2xl border-t border-x'
           : 'hidden'
-      } lg:relative lg:inset-auto lg:flex lg:w-80 lg:max-h-full lg:rounded-none lg:shadow-none lg:border-t-0 lg:border-x-0 border-l flex flex-col shrink-0 overflow-y-auto transition-colors ${
+      } lg:relative lg:inset-auto lg:flex lg:w-80 lg:h-full lg:min-h-0 lg:rounded-none lg:shadow-none lg:border-t-0 lg:border-x-0 border-l flex flex-col shrink-0 overflow-hidden transition-colors ${
         isLight
           ? 'bg-white border-zinc-200 text-zinc-800'
           : 'bg-[#111113] border-zinc-800 text-zinc-200'
@@ -935,6 +966,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
       </div>
+
+      {/* Scrollable Sidebar Body */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-6">
 
       {/* Tab: 路網統計 */}
       {currentTab === 'stats' && (
@@ -2460,6 +2494,425 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                     );
                   })()}
+
+                {/* City Station Style + Exact 9 Official SVG Variants + SVG Color + Guangzhou Badges */}
+                {(() => {
+                  const { colors: stationConnectedColors } = getStationLinesAndColors(selectedStation);
+                  const effectiveVariant = resolveEffectiveStationVariant(
+                    selectedStation.stationStyle,
+                    selectedStation.type,
+                    selectedStation.stationVariant
+                  );
+                  const isGuangzhouVariant =
+                    effectiveVariant === 'guangzhou_basic' ||
+                    effectiveVariant === 'guangzhou_interchange' ||
+                    effectiveVariant === 'guangzhou_interchange_2024';
+
+                  const applyStationSvgColor = (newCol: string | undefined) => {
+                    if (!selectedStation) return;
+                    const nextGzBadges =
+                      selectedStation.gzBadges &&
+                      (effectiveVariant === 'guangzhou_basic' ||
+                        effectiveVariant === 'guangzhou_interchange_2024')
+                        ? selectedStation.gzBadges.map((b) => ({ ...b, color: undefined }))
+                        : selectedStation.gzBadges;
+                    onUpdateStation({
+                      ...selectedStation,
+                      stationColor: newCol,
+                      ...(nextGzBadges ? { gzBadges: nextGzBadges } : {}),
+                    });
+                  };
+
+                  const variantButtons: Array<{
+                    variant: Exclude<StationVariant, 'auto'>;
+                    label: string;
+                    viewBox: string;
+                    isInterchange: boolean;
+                  }> = [
+                    { variant: 'shanghai_basic', label: t('sidebar.variantShanghaiBasic'), viewBox: '-12 -10 24 20', isInterchange: false },
+                    { variant: 'shanghai_2020', label: t('sidebar.variantShanghai2020'), viewBox: '-12 -10 24 20', isInterchange: false },
+                    { variant: 'shanghai_interchange', label: t('sidebar.variantShanghaiInterchange'), viewBox: '-14 -10 28 20', isInterchange: true },
+                    { variant: 'shanghai_suburban', label: t('sidebar.variantShanghaiSuburban'), viewBox: '-12 -10 24 20', isInterchange: false },
+                    { variant: 'guangzhou_basic', label: t('sidebar.variantGuangzhouBasic'), viewBox: '-20 -10 40 20', isInterchange: false },
+                    { variant: 'guangzhou_interchange', label: t('sidebar.variantGuangzhouInterchange'), viewBox: '-30 -12 60 24', isInterchange: true },
+                    { variant: 'guangzhou_interchange_2024', label: t('sidebar.variantGuangzhouInterchange2024'), viewBox: '-30 -15 60 30', isInterchange: true },
+                    { variant: 'beijing_basic', label: t('sidebar.variantBeijingBasic'), viewBox: '-12 -10 24 20', isInterchange: false },
+                    { variant: 'beijing_interchange', label: t('sidebar.variantBeijingInterchange'), viewBox: '-12 -11 24 22', isInterchange: true },
+                  ];
+
+                  const activeGzBadges = isGuangzhouVariant && effectiveVariant
+                    ? getDefaultGzBadges(
+                        effectiveVariant,
+                        selectedStation.gzBadges,
+                        stationConnectedColors,
+                        selectedStation.code,
+                        selectedStation.stationColor
+                      )
+                    : [];
+
+                  const updateGzBadges = (nextBadges: GuangzhouBadgeItem[]) => {
+                    onUpdateStation({
+                      ...selectedStation,
+                      gzBadges: nextBadges,
+                    });
+                  };
+
+                  return (
+                    <>
+                      {/* 4 High-level City Style Presets */}
+                      <div className={`pt-3 border-t space-y-2 ${borderCol}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`font-medium ${textMuted}`}>{t('sidebar.cityStyleTitle')}</span>
+                          <span className={`text-[10px] font-mono ${textHeading}`}>
+                            {(() => {
+                              const s = selectedStation.stationStyle || 'default';
+                              if (s === 'beijing') return t('sidebar.cityBeijing');
+                              if (s === 'shanghai') return t('sidebar.cityShanghai');
+                              if (s === 'guangzhou') return t('sidebar.cityGuangzhou');
+                              return t('sidebar.cityDefault');
+                            })()}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {(
+                            [
+                              {
+                                id: 'default' as StationStyle,
+                                label: t('sidebar.cityDefault'),
+                                desc: t('sidebar.cityDefaultDesc'),
+                                preview: (
+                                  <svg className="w-6 h-5" viewBox="-14 -12 28 24">
+                                    <circle r={7} fill="#ffffff" stroke={selectedStation.stationColor || '#0f172a'} strokeWidth={2.4} />
+                                  </svg>
+                                ),
+                              },
+                              {
+                                id: 'beijing' as StationStyle,
+                                label: t('sidebar.cityBeijing'),
+                                desc: t('sidebar.cityBeijingDesc'),
+                                preview: (
+                                  <svg className="w-6 h-5" viewBox="-12 -11 24 22">
+                                    <CityStationSymbol variant="beijing_interchange" stationColor={selectedStation.stationColor} />
+                                  </svg>
+                                ),
+                              },
+                              {
+                                id: 'shanghai' as StationStyle,
+                                label: t('sidebar.cityShanghai'),
+                                desc: t('sidebar.cityShanghaiDesc'),
+                                preview: (
+                                  <svg className="w-6 h-5" viewBox="-12 -10 24 20">
+                                    <CityStationSymbol variant="shanghai_interchange" stationColor={selectedStation.stationColor} />
+                                  </svg>
+                                ),
+                              },
+                              {
+                                id: 'guangzhou' as StationStyle,
+                                label: t('sidebar.cityGuangzhou'),
+                                desc: t('sidebar.cityGuangzhouDesc'),
+                                preview: (
+                                  <svg className="w-7 h-5" viewBox="-20 -10 40 20">
+                                    <CityStationSymbol variant="guangzhou_basic" stationColor={selectedStation.stationColor} />
+                                  </svg>
+                                ),
+                              },
+                            ]
+                          ).map((item) => {
+                            const active =
+                              (selectedStation.stationStyle || 'default') === item.id &&
+                              (!selectedStation.stationVariant || selectedStation.stationVariant === 'auto');
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() =>
+                                  onUpdateStation({
+                                    ...selectedStation,
+                                    stationStyle: item.id,
+                                    stationVariant: undefined,
+                                  })
+                                }
+                                title={item.desc}
+                                className={`py-1.5 px-1 rounded-md border text-center transition-colors cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                  active ? btnActive : btnInactive
+                                }`}
+                              >
+                                <span className="w-9 h-6 rounded bg-white border border-zinc-200 flex items-center justify-center">
+                                  {item.preview}
+                                </span>
+                                <span className="text-[10px] leading-none">{item.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Exact 9 Official SVG Station Variants */}
+                      <div className={`pt-3 border-t space-y-2 ${borderCol}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`font-medium ${textMuted}`}>{t('sidebar.stationVariantTitle')}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateStation({
+                                ...selectedStation,
+                                stationVariant: undefined,
+                              })
+                            }
+                            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                              !selectedStation.stationVariant || selectedStation.stationVariant === 'auto'
+                                ? btnActive
+                                : btnInactive
+                            }`}
+                          >
+                            {t('sidebar.variantAuto')}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {variantButtons.map((item) => {
+                            const isActive =
+                              selectedStation.stationVariant === item.variant ||
+                              ((!selectedStation.stationVariant || selectedStation.stationVariant === 'auto') &&
+                                effectiveVariant === item.variant);
+                            return (
+                              <button
+                                key={item.variant}
+                                type="button"
+                                onClick={() =>
+                                  onUpdateStation({
+                                    ...selectedStation,
+                                    stationVariant: item.variant,
+                                    stationStyle: getCityFromVariant(item.variant),
+                                    type: item.isInterchange ? 'interchange' : 'regular',
+                                  })
+                                }
+                                title={item.label}
+                                className={`p-1.5 rounded-md border text-center transition-colors cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                  isActive ? btnActive : btnInactive
+                                }`}
+                              >
+                                <span className="w-full h-7 rounded bg-white border border-zinc-200 flex items-center justify-center overflow-hidden">
+                                  <svg className="w-16 h-6" viewBox={item.viewBox}>
+                                    <CityStationSymbol
+                                      variant={item.variant}
+                                      stationColor={selectedStation.stationColor}
+                                    />
+                                  </svg>
+                                </span>
+                                <span className="text-[9.5px] leading-tight truncate w-full">{item.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Station SVG Color Customization (All Station Symbols) */}
+                      <div className={`pt-3 border-t space-y-2 ${borderCol}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`font-medium ${textMuted}`}>{t('sidebar.stationColorTitle')}</span>
+                          {selectedStation.stationColor && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStationHexInput('#18181B');
+                                applyStationSvgColor(undefined);
+                              }}
+                              className={`text-[10px] underline cursor-pointer ${textMuted} hover:opacity-80`}
+                            >
+                              {t('sidebar.stationColorReset')}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className={`flex items-center gap-2 p-1.5 rounded-md border ${surfaceSubtle}`}>
+                          <input
+                            type="color"
+                            value={selectedStation.stationColor || '#18181B'}
+                            onChange={(e) => {
+                              const newCol = e.target.value.toUpperCase();
+                              setStationHexInput(newCol);
+                              applyStationSvgColor(newCol);
+                            }}
+                            className="w-6 h-6 rounded cursor-pointer bg-transparent border-0 p-0 shrink-0"
+                            title={t('sidebar.pickColorTip')}
+                          />
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <Hash className={`w-3 h-3 shrink-0 ${textMuted}`} />
+                            <input
+                              type="text"
+                              value={stationHexInput}
+                              onChange={(e) => {
+                                let val = e.target.value.trim();
+                                if (!val.startsWith('#') && val.length > 0) {
+                                  val = '#' + val;
+                                }
+                                setStationHexInput(val);
+                                if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(val)) {
+                                  applyStationSvgColor(val.toUpperCase());
+                                }
+                              }}
+                              maxLength={7}
+                              className={`bg-transparent font-mono uppercase font-semibold focus:outline-none w-full text-xs ${textHeading}`}
+                              placeholder="#18181B"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-9 gap-1">
+                          {[
+                            '#18181B',
+                            '#71717A',
+                            '#E11D48',
+                            '#2563EB',
+                            '#16A34A',
+                            '#EAB308',
+                            '#F97316',
+                            '#9333EA',
+                            '#06B6D4',
+                          ].map((col) => (
+                            <button
+                              key={`st-col-${col}`}
+                              type="button"
+                              onClick={() => {
+                                setStationHexInput(col);
+                                applyStationSvgColor(col);
+                              }}
+                              className={`w-full h-5 rounded border transition-transform hover:scale-105 cursor-pointer ${
+                                (selectedStation.stationColor || '').toUpperCase() === col
+                                  ? 'ring-2 ring-zinc-500 border-white'
+                                  : 'border-black/20'
+                              }`}
+                              style={{ backgroundColor: col }}
+                              title={col}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Guangzhou Pill Numbers & Per-Capsule Colors Editor */}
+                      {isGuangzhouVariant && (
+                        <div className={`pt-3 border-t space-y-2.5 ${borderCol}`}>
+                          <div className="flex items-center justify-between">
+                            <span className={`font-semibold ${textHeading}`}>{t('sidebar.gzBadgesTitle')}</span>
+                            {effectiveVariant === 'guangzhou_interchange' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGzBadges([
+                                    ...activeGzBadges,
+                                    {
+                                      line: String(activeGzBadges.length + 1),
+                                      number: '01',
+                                      color: '#2563EB',
+                                    },
+                                  ])
+                                }
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium cursor-pointer ${btnInactive}`}
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>{t('sidebar.gzAddBadge')}</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {activeGzBadges.map((badge, idx) => (
+                              <div
+                                key={`gz-badge-${idx}`}
+                                className={`p-2 rounded-md border space-y-1.5 ${surfaceSubtle}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-zinc-900 border border-zinc-300">
+                                      {badge.line || '1'} | {badge.number || '01'}
+                                    </span>
+                                    <span className={`text-[10px] font-mono ${textMuted}`}>
+                                      #{idx + 1}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <label className="inline-flex items-center gap-1 cursor-pointer" title={t('sidebar.gzBadgeColor')}>
+                                      <span className={`text-[10px] ${textMuted}`}>{t('sidebar.gzBadgeColor')}</span>
+                                      <input
+                                        type="color"
+                                        value={badge.color || selectedStation.stationColor || '#18181B'}
+                                        onChange={(e) => {
+                                          const col = e.target.value.toUpperCase();
+                                          updateGzBadges(
+                                            activeGzBadges.map((b, i) =>
+                                              i === idx ? { ...b, color: col } : b
+                                            )
+                                          );
+                                        }}
+                                        className="w-5 h-5 rounded cursor-pointer bg-transparent border-0 p-0"
+                                      />
+                                    </label>
+                                    {effectiveVariant === 'guangzhou_interchange' && activeGzBadges.length > 2 && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateGzBadges(activeGzBadges.filter((_, i) => i !== idx))
+                                        }
+                                        className="p-0.5 text-rose-500 hover:bg-rose-500/10 rounded cursor-pointer"
+                                        title={t('sidebar.gzRemoveBadge')}
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <div>
+                                    <span className={`text-[10px] block mb-0.5 ${textMuted}`}>
+                                      {t('sidebar.gzLineNum')}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={badge.line}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        updateGzBadges(
+                                          activeGzBadges.map((b, i) =>
+                                            i === idx ? { ...b, line: val } : b
+                                          )
+                                        );
+                                      }}
+                                      maxLength={8}
+                                      className={`w-full px-2 py-1 text-center font-mono font-semibold text-xs rounded border focus:outline-none ${inputCls}`}
+                                      placeholder="1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <span className={`text-[10px] block mb-0.5 ${textMuted}`}>
+                                      {t('sidebar.gzStationNum')}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={badge.number}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        updateGzBadges(
+                                          activeGzBadges.map((b, i) =>
+                                            i === idx ? { ...b, number: val } : b
+                                          )
+                                        );
+                                      }}
+                                      maxLength={8}
+                                      className={`w-full px-2 py-1 text-center font-mono font-semibold text-xs rounded border focus:outline-none ${inputCls}`}
+                                      placeholder="01"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Label Position: 8 directions / Free drag */}
@@ -2641,19 +3094,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
 
-              {/* Z-Order */}
-              {onUpdateStationZIndex && (
-                <div className="p-4">
-                  <ZOrderControl
-                    value={selectedStation.zIndex ?? 0}
-                    onChange={(nextZ) => onUpdateStationZIndex(selectedStation.id, nextZ)}
-                    targetType="station"
-                    theme={theme}
-                  />
-                </div>
-              )}
-
-              {/* Regular Station SVG Free Transform */}
+              {/* Show More Toggle for Station Advanced Controls */}
               {(() => {
                 const curScale = selectedStation.scale ?? 1;
                 const curScaleX = selectedStation.scaleX ?? 1;
@@ -2669,244 +3110,361 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   curRot !== 0 ||
                   curLabelScale !== 1 ||
                   curLabelRot !== 0 ||
-                  curOpacity !== 1;
+                  curOpacity !== 1 ||
+                  (selectedStation.zIndex ?? 0) !== 0;
                 const scaleMax = Math.max(4, Math.ceil(curScale + 1));
                 const lblScaleMax = Math.max(3.5, Math.ceil(curLabelScale + 1));
 
                 return (
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className={`font-semibold ${textHeading}`}>{t('sidebar.svgFreeTransform')}</span>
-                      {isModified && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdateStation({
-                              ...selectedStation,
-                              scale: 1,
-                              scaleX: 1,
-                              scaleY: 1,
-                              rotation: 0,
-                              labelScale: 1,
-                              labelRotation: 0,
-                              opacity: 1,
-                            })
-                          }
-                          className={`text-[11px] underline cursor-pointer ${textMuted}`}
-                        >
-                          {t('sidebar.resetAll')}
-                        </button>
-                      )}
-                    </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreStation((prev) => !prev)}
+                      className={`w-full px-4 py-3 flex items-center justify-between text-left cursor-pointer transition-colors ${
+                        isLight ? 'hover:bg-zinc-50' : 'hover:bg-zinc-900/50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-semibold text-xs ${textHeading}`}>
+                            {showMoreStation ? t('sidebar.showLess') : t('sidebar.showMore')}
+                          </span>
+                          {isModified && (
+                            <span
+                              className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded border ${
+                                isLight
+                                  ? 'bg-zinc-100 border-zinc-200 text-zinc-700'
+                                  : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                              }`}
+                            >
+                              {t('sidebar.customizedBadge')}
+                            </span>
+                          )}
+                        </div>
+                        <div className={`text-[10px] mt-0.5 truncate ${textMuted}`}>
+                          {t('sidebar.moreAdvancedHint')}
+                        </div>
+                      </div>
+                      <span className={textMuted}>
+                        {showMoreStation ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </span>
+                    </button>
 
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className={textMuted}>{t('sidebar.iconScale')}</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            step={0.1}
-                            min={0.1}
-                            value={curScale}
-                            onChange={(e) => {
-                              const v = parseFloat(e.target.value);
-                              if (Number.isFinite(v)) {
-                                onUpdateStation({ ...selectedStation, scale: normalizeSvgScale(v, 0.1) });
+                    {showMoreStation && (
+                      <div className={`divide-y border-t ${borderCol} ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+                        {/* Exact Coordinates & Batch Apply Style */}
+                        <div className="p-4 space-y-2.5">
+                          <span className={`font-semibold block ${textHeading}`}>{t('sidebar.coordsPrecision')}</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <span className={`text-[10px] block mb-1 ${textMuted}`}>X</span>
+                              <input
+                                type="number"
+                                step={1}
+                                value={selectedStation.x}
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value);
+                                  if (Number.isFinite(v)) {
+                                    onUpdateStation({ ...selectedStation, x: Math.round(v) });
+                                  }
+                                }}
+                                className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                              />
+                            </div>
+                            <div>
+                              <span className={`text-[10px] block mb-1 ${textMuted}`}>Y</span>
+                              <input
+                                type="number"
+                                step={1}
+                                value={selectedStation.y}
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value);
+                                  if (Number.isFinite(v)) {
+                                    onUpdateStation({ ...selectedStation, y: Math.round(v) });
+                                  }
+                                }}
+                                className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                              />
+                            </div>
+                          </div>
+                          {onApplyStationStyleToAll && (
+                            <button
+                              type="button"
+                              onClick={() => onApplyStationStyleToAll(selectedStation.stationStyle || 'default')}
+                              className={`w-full py-1.5 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${btnInactive}`}
+                            >
+                              {t('sidebar.applyStationStyleAll')}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Z-Order */}
+                        {onUpdateStationZIndex && (
+                          <div className="p-4">
+                            <ZOrderControl
+                              value={selectedStation.zIndex ?? 0}
+                              onChange={(nextZ) => onUpdateStationZIndex(selectedStation.id, nextZ)}
+                              targetType="station"
+                              theme={theme}
+                            />
+                          </div>
+                        )}
+
+                        {/* Regular Station SVG Free Transform */}
+                        <div className="p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className={`font-semibold ${textHeading}`}>{t('sidebar.svgFreeTransform')}</span>
+                            {isModified && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateStation({
+                                    ...selectedStation,
+                                    scale: 1,
+                                    scaleX: 1,
+                                    scaleY: 1,
+                                    rotation: 0,
+                                    labelScale: 1,
+                                    labelRotation: 0,
+                                    opacity: 1,
+                                  })
+                                }
+                                className={`text-[11px] underline cursor-pointer ${textMuted}`}
+                              >
+                                {t('sidebar.resetAll')}
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className={textMuted}>{t('sidebar.iconScale')}</span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  step={0.1}
+                                  min={0.1}
+                                  value={curScale}
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      onUpdateStation({ ...selectedStation, scale: normalizeSvgScale(v, 0.1) });
+                                    }
+                                  }}
+                                  className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                                />
+                                <span className={`font-mono text-[10px] ${textMuted}`}>×</span>
+                              </div>
+                            </div>
+                            <input
+                              type="range"
+                              min={0.2}
+                              max={scaleMax}
+                              step={0.05}
+                              value={Math.min(scaleMax, curScale)}
+                              onChange={(e) =>
+                                onUpdateStation({
+                                  ...selectedStation,
+                                  scale: normalizeSvgScale(parseFloat(e.target.value), 0.1),
+                                })
                               }
-                            }}
-                            className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                          />
-                          <span className={`font-mono text-[10px] ${textMuted}`}>×</span>
-                        </div>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.2}
-                        max={scaleMax}
-                        step={0.05}
-                        value={Math.min(scaleMax, curScale)}
-                        onChange={(e) =>
-                          onUpdateStation({
-                            ...selectedStation,
-                            scale: normalizeSvgScale(parseFloat(e.target.value), 0.1),
-                          })
-                        }
-                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                      />
-                      <div className="grid grid-cols-5 gap-1">
-                        {[0.5, 1, 1.5, 2, 3].map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => onUpdateStation({ ...selectedStation, scale: preset })}
-                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
-                              curScale === preset ? btnActive : btnInactive
-                            }`}
-                          >
-                            {preset}×
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                              className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                            />
+                            <div className="grid grid-cols-5 gap-1">
+                              {[0.5, 1, 1.5, 2, 3].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => onUpdateStation({ ...selectedStation, scale: preset })}
+                                  className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                                    curScale === preset ? btnActive : btnInactive
+                                  }`}
+                                >
+                                  {preset}×
+                                </button>
+                              ))}
+                            </div>
+                          </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1">
-                          <span className={textMuted}>{t('sidebar.stretchX')}</span>
-                          <span className="font-mono font-semibold tabular-nums">{curScaleX}×</span>
-                        </div>
-                        <input
-                          type="number"
-                          step={0.1}
-                          min={0.1}
-                          value={curScaleX}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value);
-                            if (Number.isFinite(v)) {
-                              onUpdateStation({ ...selectedStation, scaleX: normalizeSvgScale(v, 0.1) });
-                            }
-                          }}
-                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                        />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1">
-                          <span className={textMuted}>{t('sidebar.stretchY')}</span>
-                          <span className="font-mono font-semibold tabular-nums">{curScaleY}×</span>
-                        </div>
-                        <input
-                          type="number"
-                          step={0.1}
-                          min={0.1}
-                          value={curScaleY}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value);
-                            if (Number.isFinite(v)) {
-                              onUpdateStation({ ...selectedStation, scaleY: normalizeSvgScale(v, 0.1) });
-                            }
-                          }}
-                          className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                        />
-                      </div>
-                    </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <div className="flex justify-between text-[10px] mb-1">
+                                <span className={textMuted}>{t('sidebar.stretchX')}</span>
+                                <span className="font-mono font-semibold tabular-nums">{curScaleX}×</span>
+                              </div>
+                              <input
+                                type="number"
+                                step={0.1}
+                                min={0.1}
+                                value={curScaleX}
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value);
+                                  if (Number.isFinite(v)) {
+                                    onUpdateStation({ ...selectedStation, scaleX: normalizeSvgScale(v, 0.1) });
+                                  }
+                                }}
+                                className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-[10px] mb-1">
+                                <span className={textMuted}>{t('sidebar.stretchY')}</span>
+                                <span className="font-mono font-semibold tabular-nums">{curScaleY}×</span>
+                              </div>
+                              <input
+                                type="number"
+                                step={0.1}
+                                min={0.1}
+                                value={curScaleY}
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value);
+                                  if (Number.isFinite(v)) {
+                                    onUpdateStation({ ...selectedStation, scaleY: normalizeSvgScale(v, 0.1) });
+                                  }
+                                }}
+                                className={`w-full px-2 py-1 text-center font-mono text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                              />
+                            </div>
+                          </div>
 
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className={textMuted}>{t('sidebar.iconRotate')}</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            value={curRot}
-                            onChange={(e) => {
-                              const v = parseFloat(e.target.value);
-                              if (Number.isFinite(v)) {
-                                onUpdateStation({ ...selectedStation, rotation: normalizeSvgAngle(v) });
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className={textMuted}>{t('sidebar.iconRotate')}</span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  value={curRot}
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      onUpdateStation({ ...selectedStation, rotation: normalizeSvgAngle(v) });
+                                    }
+                                  }}
+                                  className={`w-14 px-1 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                                />
+                                <span className={`font-mono ${textMuted}`}>°</span>
+                              </div>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={359}
+                              step={1}
+                              value={curRot}
+                              onChange={(e) =>
+                                onUpdateStation({
+                                  ...selectedStation,
+                                  rotation: normalizeSvgAngle(parseFloat(e.target.value)),
+                                })
                               }
-                            }}
-                            className={`w-14 px-1 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                          />
-                          <span className={`font-mono ${textMuted}`}>°</span>
+                              className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                            />
+                            <div className="grid grid-cols-5 gap-1">
+                              {[0, 45, 90, 180, 270].map((deg) => (
+                                <button
+                                  key={deg}
+                                  type="button"
+                                  onClick={() => onUpdateStation({ ...selectedStation, rotation: deg })}
+                                  className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                                    curRot === deg ? btnActive : btnInactive
+                                  }`}
+                                >
+                                  {deg}°
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className={`pt-2.5 border-t grid grid-cols-2 gap-3 ${borderCol}`}>
+                            <div>
+                              <div className="flex justify-between text-[10px] mb-1">
+                                <span className={textMuted}>{t('sidebar.labelScale')}</span>
+                                <span className="font-mono font-semibold tabular-nums">{curLabelScale}×</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0.4}
+                                max={lblScaleMax}
+                                step={0.05}
+                                value={Math.min(lblScaleMax, curLabelScale)}
+                                onChange={(e) =>
+                                  onUpdateStation({
+                                    ...selectedStation,
+                                    labelScale: normalizeSvgScale(parseFloat(e.target.value), 0.25),
+                                  })
+                                }
+                                className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-[10px] mb-1">
+                                <span className={textMuted}>{t('sidebar.labelRotate')}</span>
+                                <span className="font-mono font-semibold tabular-nums">{curLabelRot}°</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={359}
+                                step={1}
+                                value={curLabelRot}
+                                onChange={(e) =>
+                                  onUpdateStation({
+                                    ...selectedStation,
+                                    labelRotation: normalizeSvgAngle(parseFloat(e.target.value)),
+                                  })
+                                }
+                                className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between text-[10px] mb-1">
+                              <span className={textMuted}>{t('sidebar.nodeOpacity')}</span>
+                              <span className="font-mono font-semibold tabular-nums">
+                                {Math.round(curOpacity * 100)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0.1}
+                              max={1}
+                              step={0.05}
+                              value={curOpacity}
+                              onChange={(e) =>
+                                onUpdateStation({
+                                  ...selectedStation,
+                                  opacity: normalizeOpacity(parseFloat(e.target.value)),
+                                })
+                              }
+                              className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                            />
+                          </div>
+
+                          <p className={`text-[11px] leading-relaxed ${textMuted}`}>
+                            {t('sidebar.transformHint')}
+                          </p>
                         </div>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={359}
-                        step={1}
-                        value={curRot}
-                        onChange={(e) =>
-                          onUpdateStation({
-                            ...selectedStation,
-                            rotation: normalizeSvgAngle(parseFloat(e.target.value)),
-                          })
-                        }
-                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                      />
-                      <div className="grid grid-cols-5 gap-1">
-                        {[0, 45, 90, 180, 270].map((deg) => (
+
+                        {/* Convert to Virtual Node */}
+                        <div className="p-4">
                           <button
-                            key={deg}
                             type="button"
-                            onClick={() => onUpdateStation({ ...selectedStation, rotation: deg })}
-                            className={`py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
-                              curRot === deg ? btnActive : btnInactive
-                            }`}
+                            onClick={() =>
+                              onUpdateStation({
+                                ...selectedStation,
+                                isVirtual: true,
+                              })
+                            }
+                            className={`w-full py-2 px-3 rounded-md flex items-center justify-center gap-1.5 text-xs transition-colors cursor-pointer border ${btnInactive}`}
+                            title={t('sidebar.convertToVirtualTip')}
                           >
-                            {deg}°
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>{t('sidebar.convertToVirtual')}</span>
                           </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className={`pt-2.5 border-t grid grid-cols-2 gap-3 ${borderCol}`}>
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1">
-                          <span className={textMuted}>{t('sidebar.labelScale')}</span>
-                          <span className="font-mono font-semibold tabular-nums">{curLabelScale}×</span>
                         </div>
-                        <input
-                          type="range"
-                          min={0.4}
-                          max={lblScaleMax}
-                          step={0.05}
-                          value={Math.min(lblScaleMax, curLabelScale)}
-                          onChange={(e) =>
-                            onUpdateStation({
-                              ...selectedStation,
-                              labelScale: normalizeSvgScale(parseFloat(e.target.value), 0.25),
-                            })
-                          }
-                          className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                        />
                       </div>
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1">
-                          <span className={textMuted}>{t('sidebar.labelRotate')}</span>
-                          <span className="font-mono font-semibold tabular-nums">{curLabelRot}°</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={359}
-                          step={1}
-                          value={curLabelRot}
-                          onChange={(e) =>
-                            onUpdateStation({
-                              ...selectedStation,
-                              labelRotation: normalizeSvgAngle(parseFloat(e.target.value)),
-                            })
-                          }
-                          className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[10px] mb-1">
-                        <span className={textMuted}>{t('sidebar.nodeOpacity')}</span>
-                        <span className="font-mono font-semibold tabular-nums">
-                          {Math.round(curOpacity * 100)}%
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.1}
-                        max={1}
-                        step={0.05}
-                        value={curOpacity}
-                        onChange={(e) =>
-                          onUpdateStation({
-                            ...selectedStation,
-                            opacity: normalizeOpacity(parseFloat(e.target.value)),
-                          })
-                        }
-                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                      />
-                    </div>
-
-                    <p className={`text-[11px] leading-relaxed ${textMuted}`}>
-                      {t('sidebar.transformHint')}
-                    </p>
+                    )}
                   </div>
                 );
               })()}
@@ -2976,24 +3534,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
               </div>
-
-              {/* Convert to Virtual Node */}
-              <div className="p-4">
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateStation({
-                      ...selectedStation,
-                      isVirtual: true,
-                    })
-                  }
-                  className={`w-full py-2 px-3 rounded-md flex items-center justify-center gap-1.5 text-xs transition-colors cursor-pointer border ${btnInactive}`}
-                  title={t('sidebar.convertToVirtualTip')}
-                >
-                  <XCircle className="w-3.5 h-3.5" />
-                  <span>{t('sidebar.convertToVirtual')}</span>
-                </button>
-              </div>
             </div>
           )}
 
@@ -3045,17 +3585,176 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               </div>
 
-              {/* Z-Order */}
-              {onUpdateConnectionZIndex && (
-                <div className="p-4">
-                  <ZOrderControl
-                    value={selectedConnection.zIndex ?? 0}
-                    onChange={(nextZ) => onUpdateConnectionZIndex(selectedConnection.id, nextZ)}
-                    targetType="connection"
-                    theme={theme}
-                  />
-                </div>
-              )}
+              {/* City Line Segment Style & Stroke Style Selector */}
+              {onUpdateConnectionStyle && (() => {
+                const curStyle: StrokeStyle = selectedConnection.strokeStyle ?? 'solid';
+                const lineCol = selectedConnection.color || '#E11D48';
+                const strokePreviewBg = isLight ? '#FFFFFF' : '#18181B';
+                const strokeOptions: Array<{
+                  id: StrokeStyle;
+                  label: string;
+                  preview: React.ReactNode;
+                }> = [
+                  {
+                    id: 'solid',
+                    label: t('sidebar.styleSolid'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={4} strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'dashed',
+                    label: t('sidebar.styleDashed'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={4} strokeDasharray="7 4" strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'dotted',
+                    label: t('sidebar.styleDotted'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={3} y1={6} x2={33} y2={6} stroke={lineCol} strokeWidth={4} strokeDasharray="0.1 6.5" strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'double',
+                    label: t('sidebar.styleDouble'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={5} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={strokePreviewBg} strokeWidth={1.8} strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'beijing_cased',
+                    label: t('sidebar.styleBeijingCased'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={isLight ? '#E4E4E7' : '#09090B'} strokeWidth={7} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={4} strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'beijing_rail',
+                    label: t('sidebar.styleBeijingRail'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={5.5} strokeLinecap="round" />
+                        <line x1={3} y1={6} x2={33} y2={6} stroke={strokePreviewBg} strokeWidth={2.2} strokeDasharray="5 4" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'shanghai_metro',
+                    label: t('sidebar.styleShanghaiMetro'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={strokePreviewBg} strokeWidth={6} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={4} strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'shanghai_maglev',
+                    label: t('sidebar.styleShanghaiMaglev'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={6} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={strokePreviewBg} strokeWidth={3} strokeLinecap="round" />
+                        <line x1={3} y1={6} x2={33} y2={6} stroke={lineCol} strokeWidth={1} strokeDasharray="3 3" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'guangzhou_metro',
+                    label: t('sidebar.styleGuangzhouMetro'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={8} strokeOpacity={0.28} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={strokePreviewBg} strokeWidth={5.2} strokeLinecap="round" />
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={3.5} strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'guangzhou_intercity',
+                    label: t('sidebar.styleGuangzhouIntercity'),
+                    preview: (
+                      <svg className="w-9 h-3 shrink-0" viewBox="0 0 36 12">
+                        <line x1={2} y1={6} x2={34} y2={6} stroke={lineCol} strokeWidth={4} strokeDasharray="9 3 2 3" strokeLinecap="round" />
+                      </svg>
+                    ),
+                  },
+                ];
+
+                return (
+                  <div className="p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold ${textHeading}`}>{t('sidebar.cityLineStyleTitle')}</span>
+                      <span className={`text-[10px] font-mono ${textMuted}`}>
+                        {strokeOptions.find((o) => o.id === curStyle)?.label || curStyle}
+                      </span>
+                    </div>
+
+                    {/* Quick City Presets */}
+                    <div className="grid grid-cols-4 gap-1">
+                      {(
+                        [
+                          { id: 'solid' as StrokeStyle, label: t('sidebar.cityDefault') },
+                          { id: 'beijing_cased' as StrokeStyle, label: t('sidebar.cityBeijing') },
+                          { id: 'shanghai_metro' as StrokeStyle, label: t('sidebar.cityShanghai') },
+                          { id: 'guangzhou_metro' as StrokeStyle, label: t('sidebar.cityGuangzhou') },
+                        ]
+                      ).map((city) => {
+                        const isCityMatch =
+                          (city.id === 'solid' && (curStyle === 'solid' || curStyle === 'dashed' || curStyle === 'dotted' || curStyle === 'double')) ||
+                          (city.id === 'beijing_cased' && (curStyle === 'beijing_cased' || curStyle === 'beijing_rail')) ||
+                          (city.id === 'shanghai_metro' && (curStyle === 'shanghai_metro' || curStyle === 'shanghai_maglev')) ||
+                          (city.id === 'guangzhou_metro' && (curStyle === 'guangzhou_metro' || curStyle === 'guangzhou_intercity'));
+                        return (
+                          <button
+                            key={city.id}
+                            type="button"
+                            onClick={() => onUpdateConnectionStyle(selectedConnection.id, { strokeStyle: city.id })}
+                            className={`py-1 px-1.5 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                              isCityMatch ? btnActive : btnInactive
+                            }`}
+                          >
+                            {city.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* All 10 Line Segment Styles with Live Previews */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {strokeOptions.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() =>
+                            onUpdateConnectionStyle(selectedConnection.id, { strokeStyle: opt.id })
+                          }
+                          className={`px-2 py-1.5 rounded-md border flex items-center justify-between gap-1.5 text-[11px] transition-colors cursor-pointer ${
+                            curStyle === opt.id ? btnActive : btnInactive
+                          }`}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                          {opt.preview}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Parallel Offset & Auto-Bundling (Unlimited) */}
               {onUpdateConnectionOffset && (() => {
@@ -3215,8 +3914,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 );
               })()}
 
-              {/* SVG Stroke Styling */}
-              {onUpdateConnectionStyle && (() => {
+              {/* Show More Toggle for Connection Advanced Controls */}
+              {(() => {
                 const curWidth = normalizeStrokeWidth(selectedConnection.strokeWidth ?? 6);
                 const curRadius = normalizeCornerRadius(selectedConnection.cornerRadius ?? 14);
                 const curStyle: StrokeStyle = selectedConnection.strokeStyle ?? 'solid';
@@ -3227,217 +3926,272 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   curRadius !== 14 ||
                   curStyle !== 'solid' ||
                   curCap !== 'round' ||
-                  curOpacity !== 1;
+                  curOpacity !== 1 ||
+                  (selectedConnection.zIndex ?? 0) !== 0;
                 const widthSliderMax = Math.max(36, Math.ceil(curWidth + 12));
                 const radiusSliderMax = Math.max(60, Math.ceil(curRadius + 20));
+                const sameColorCount = connections.filter(
+                  (c) => (c.color || '').toUpperCase() === (selectedConnection.color || '').toUpperCase()
+                ).length;
 
                 return (
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className={`font-semibold ${textHeading}`}>{t('sidebar.strokeStylingTitle')}</span>
-                      {isModified && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdateConnectionStyle(selectedConnection.id, {
-                              strokeWidth: 6,
-                              cornerRadius: 14,
-                              strokeStyle: 'solid',
-                              lineCap: 'round',
-                              opacity: 1,
-                            })
-                          }
-                          className={`text-[11px] underline cursor-pointer ${textMuted}`}
-                        >
-                          {t('sidebar.resetDefault')}
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className={textMuted}>{t('sidebar.strokeWidth')}</span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateConnectionStyle(selectedConnection.id, {
-                                strokeWidth: normalizeStrokeWidth(curWidth - 1),
-                              })
-                            }
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
-                          >
-                            -1
-                          </button>
-                          <input
-                            type="number"
-                            step={0.5}
-                            min={0.5}
-                            value={curWidth}
-                            onChange={(e) => {
-                              const v = parseFloat(e.target.value);
-                              if (Number.isFinite(v)) {
-                                onUpdateConnectionStyle(selectedConnection.id, {
-                                  strokeWidth: normalizeStrokeWidth(v),
-                                });
-                              }
-                            }}
-                            className={`w-14 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateConnectionStyle(selectedConnection.id, {
-                                strokeWidth: normalizeStrokeWidth(curWidth + 1),
-                              })
-                            }
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
-                          >
-                            +1
-                          </button>
-                        </div>
-                      </div>
-                      <input
-                        type="range"
-                        min={1}
-                        max={widthSliderMax}
-                        step={0.5}
-                        value={curWidth}
-                        onChange={(e) =>
-                          onUpdateConnectionStyle(selectedConnection.id, {
-                            strokeWidth: normalizeStrokeWidth(parseFloat(e.target.value)),
-                          })
-                        }
-                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                      />
-                      <div className="grid grid-cols-6 gap-1">
-                        {[2, 4, 6, 10, 16, 24].map((w) => (
-                          <button
-                            key={w}
-                            type="button"
-                            onClick={() =>
-                              onUpdateConnectionStyle(selectedConnection.id, { strokeWidth: w })
-                            }
-                            className={`py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
-                              curWidth === w ? btnActive : btnInactive
-                            }`}
-                          >
-                            {w}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className={textMuted}>{t('sidebar.cornerRadius')}</span>
-                        <input
-                          type="number"
-                          step={1}
-                          min={0}
-                          value={curRadius}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value);
-                            if (Number.isFinite(v)) {
-                              onUpdateConnectionStyle(selectedConnection.id, {
-                                cornerRadius: normalizeCornerRadius(v),
-                              });
-                            }
-                          }}
-                          className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
-                        />
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={radiusSliderMax}
-                        step={1}
-                        value={curRadius}
-                        onChange={(e) =>
-                          onUpdateConnectionStyle(selectedConnection.id, {
-                            cornerRadius: normalizeCornerRadius(parseFloat(e.target.value)),
-                          })
-                        }
-                        className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <span className={`text-[11px] block mb-1.5 ${textMuted}`}>{t('sidebar.strokeStyle')}</span>
-                      <div className="grid grid-cols-4 gap-1">
-                        {(
-                          [
-                            { id: 'solid', label: t('sidebar.styleSolid') },
-                            { id: 'dashed', label: t('sidebar.styleDashed') },
-                            { id: 'dotted', label: t('sidebar.styleDotted') },
-                            { id: 'double', label: t('sidebar.styleDouble') },
-                          ] as Array<{ id: StrokeStyle; label: string }>
-                        ).map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() =>
-                              onUpdateConnectionStyle(selectedConnection.id, { strokeStyle: opt.id })
-                            }
-                            className={`py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
-                              curStyle === opt.id ? btnActive : btnInactive
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <span className={`text-[10px] block mb-1 ${textMuted}`}>{t('sidebar.lineCap')}</span>
-                        <div className="grid grid-cols-3 gap-1">
-                          {(
-                            [
-                              { id: 'round', label: t('sidebar.capRound') },
-                              { id: 'butt', label: t('sidebar.capButt') },
-                              { id: 'square', label: t('sidebar.capSquare') },
-                            ] as Array<{ id: LineCapStyle; label: string }>
-                          ).map((cap) => (
-                            <button
-                              key={cap.id}
-                              type="button"
-                              onClick={() =>
-                                onUpdateConnectionStyle(selectedConnection.id, { lineCap: cap.id })
-                              }
-                              className={`py-1 rounded text-[10px] border transition-colors cursor-pointer ${
-                                curCap === cap.id ? btnActive : btnInactive
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreConnection((prev) => !prev)}
+                      className={`w-full px-4 py-3 flex items-center justify-between text-left cursor-pointer transition-colors ${
+                        isLight ? 'hover:bg-zinc-50' : 'hover:bg-zinc-900/50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-semibold text-xs ${textHeading}`}>
+                            {showMoreConnection ? t('sidebar.showLess') : t('sidebar.showMore')}
+                          </span>
+                          {isModified && (
+                            <span
+                              className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded border ${
+                                isLight
+                                  ? 'bg-zinc-100 border-zinc-200 text-zinc-700'
+                                  : 'bg-zinc-800 border-zinc-700 text-zinc-300'
                               }`}
                             >
-                              {cap.label}
-                            </button>
-                          ))}
+                              {t('sidebar.customizedBadge')}
+                            </span>
+                          )}
+                        </div>
+                        <div className={`text-[10px] mt-0.5 truncate ${textMuted}`}>
+                          {t('sidebar.moreLineHint')}
                         </div>
                       </div>
+                      <span className={textMuted}>
+                        {showMoreConnection ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </span>
+                    </button>
 
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1">
-                          <span className={textMuted}>{t('sidebar.opacity')}</span>
-                          <span className="font-mono font-semibold tabular-nums">
-                            {Math.round(curOpacity * 100)}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0.1}
-                          max={1}
-                          step={0.05}
-                          value={curOpacity}
-                          onChange={(e) =>
-                            onUpdateConnectionStyle(selectedConnection.id, {
-                              opacity: normalizeOpacity(parseFloat(e.target.value)),
-                            })
-                          }
-                          className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer mt-1.5"
-                        />
+                    {showMoreConnection && (
+                      <div className={`divide-y border-t ${borderCol} ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+                        {/* Batch Apply Line Style */}
+                        {(onApplyLineStyleToSameColor || onApplyLineStyleToAll) && (
+                          <div className="p-4 space-y-1.5">
+                            {onApplyLineStyleToSameColor && (
+                              <button
+                                type="button"
+                                onClick={() => onApplyLineStyleToSameColor(selectedConnection.id)}
+                                className={`w-full py-1.5 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${btnInactive}`}
+                              >
+                                {t('sidebar.applyLineStyleSameColor', { count: sameColorCount })}
+                              </button>
+                            )}
+                            {onApplyLineStyleToAll && (
+                              <button
+                                type="button"
+                                onClick={() => onApplyLineStyleToAll(selectedConnection.id)}
+                                className={`w-full py-1.5 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${btnInactive}`}
+                              >
+                                {t('sidebar.applyLineStyleAll')}
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Z-Order */}
+                        {onUpdateConnectionZIndex && (
+                          <div className="p-4">
+                            <ZOrderControl
+                              value={selectedConnection.zIndex ?? 0}
+                              onChange={(nextZ) => onUpdateConnectionZIndex(selectedConnection.id, nextZ)}
+                              targetType="connection"
+                              theme={theme}
+                            />
+                          </div>
+                        )}
+
+                        {/* SVG Fine Stroke Controls */}
+                        {onUpdateConnectionStyle && (
+                          <div className="p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className={`font-semibold ${textHeading}`}>{t('sidebar.strokeStylingTitle')}</span>
+                              {isModified && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateConnectionStyle(selectedConnection.id, {
+                                      strokeWidth: 6,
+                                      cornerRadius: 14,
+                                      strokeStyle: 'solid',
+                                      lineCap: 'round',
+                                      opacity: 1,
+                                    })
+                                  }
+                                  className={`text-[11px] underline cursor-pointer ${textMuted}`}
+                                >
+                                  {t('sidebar.resetDefault')}
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className={textMuted}>{t('sidebar.strokeWidth')}</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onUpdateConnectionStyle(selectedConnection.id, {
+                                        strokeWidth: normalizeStrokeWidth(curWidth - 1),
+                                      })
+                                    }
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
+                                  >
+                                    -1
+                                  </button>
+                                  <input
+                                    type="number"
+                                    step={0.5}
+                                    min={0.5}
+                                    value={curWidth}
+                                    onChange={(e) => {
+                                      const v = parseFloat(e.target.value);
+                                      if (Number.isFinite(v)) {
+                                        onUpdateConnectionStyle(selectedConnection.id, {
+                                          strokeWidth: normalizeStrokeWidth(v),
+                                        });
+                                      }
+                                    }}
+                                    className={`w-14 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onUpdateConnectionStyle(selectedConnection.id, {
+                                        strokeWidth: normalizeStrokeWidth(curWidth + 1),
+                                      })
+                                    }
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${btnInactive}`}
+                                  >
+                                    +1
+                                  </button>
+                                </div>
+                              </div>
+                              <input
+                                type="range"
+                                min={1}
+                                max={widthSliderMax}
+                                step={0.5}
+                                value={curWidth}
+                                onChange={(e) =>
+                                  onUpdateConnectionStyle(selectedConnection.id, {
+                                    strokeWidth: normalizeStrokeWidth(parseFloat(e.target.value)),
+                                  })
+                                }
+                                className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                              />
+                              <div className="grid grid-cols-6 gap-1">
+                                {[2, 4, 6, 10, 16, 24].map((w) => (
+                                  <button
+                                    key={w}
+                                    type="button"
+                                    onClick={() =>
+                                      onUpdateConnectionStyle(selectedConnection.id, { strokeWidth: w })
+                                    }
+                                    className={`py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer tabular-nums ${
+                                      curWidth === w ? btnActive : btnInactive
+                                    }`}
+                                  >
+                                    {w}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className={textMuted}>{t('sidebar.cornerRadius')}</span>
+                                <input
+                                  type="number"
+                                  step={1}
+                                  min={0}
+                                  value={curRadius}
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      onUpdateConnectionStyle(selectedConnection.id, {
+                                        cornerRadius: normalizeCornerRadius(v),
+                                      });
+                                    }
+                                  }}
+                                  className={`w-16 px-1.5 py-0.5 text-center font-mono font-semibold text-[11px] rounded border focus:outline-none tabular-nums ${inputCls}`}
+                                />
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={radiusSliderMax}
+                                step={1}
+                                value={curRadius}
+                                onChange={(e) =>
+                                  onUpdateConnectionStyle(selectedConnection.id, {
+                                    cornerRadius: normalizeCornerRadius(parseFloat(e.target.value)),
+                                  })
+                                }
+                                className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <span className={`text-[10px] block mb-1 ${textMuted}`}>{t('sidebar.lineCap')}</span>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {(
+                                    [
+                                      { id: 'round', label: t('sidebar.capRound') },
+                                      { id: 'butt', label: t('sidebar.capButt') },
+                                      { id: 'square', label: t('sidebar.capSquare') },
+                                    ] as Array<{ id: LineCapStyle; label: string }>
+                                  ).map((cap) => (
+                                    <button
+                                      key={cap.id}
+                                      type="button"
+                                      onClick={() =>
+                                        onUpdateConnectionStyle(selectedConnection.id, { lineCap: cap.id })
+                                      }
+                                      className={`py-1 rounded text-[10px] border transition-colors cursor-pointer ${
+                                        curCap === cap.id ? btnActive : btnInactive
+                                      }`}
+                                    >
+                                      {cap.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex justify-between text-[10px] mb-1">
+                                  <span className={textMuted}>{t('sidebar.opacity')}</span>
+                                  <span className="font-mono font-semibold tabular-nums">
+                                    {Math.round(curOpacity * 100)}%
+                                  </span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min={0.1}
+                                  max={1}
+                                  step={0.05}
+                                  value={curOpacity}
+                                  onChange={(e) =>
+                                    onUpdateConnectionStyle(selectedConnection.id, {
+                                      opacity: normalizeOpacity(parseFloat(e.target.value)),
+                                    })
+                                  }
+                                  className="w-full h-1.5 accent-zinc-900 dark:accent-zinc-100 cursor-pointer mt-1.5"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })()}
@@ -4642,6 +5396,112 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Default State: Overview & Quick Directory */}
           {!selectedStation && !selectedConnection && !selectedImage && !selectedText && (
             <div className={`divide-y text-xs leading-relaxed ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+              {/* City Metro Style Presets (Standard / Beijing / Shanghai / Guangzhou) */}
+              <div className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className={`font-semibold text-xs ${textHeading}`}>{t('sidebar.cityPresetTitle')}</h2>
+                    <p className={`text-[10px] mt-0.5 ${textMuted}`}>{t('sidebar.cityPresetSubtitle')}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      {
+                        id: 'default' as StationStyle,
+                        label: t('sidebar.cityDefault'),
+                        desc: t('sidebar.cityDefaultDesc'),
+                        preview: (
+                          <svg className="w-16 h-6" viewBox="0 0 64 24">
+                            <line x1={6} y1={12} x2={58} y2={12} stroke="#E11D48" strokeWidth={4} strokeLinecap="round" />
+                            <circle cx={20} cy={12} r={5} fill="#ffffff" stroke="#0f172a" strokeWidth={2} />
+                            <circle cx={44} cy={12} r={6.5} fill="#ffffff" stroke="#0f172a" strokeWidth={2.2} />
+                            <circle cx={42} cy={12} r={2} fill="#E11D48" />
+                            <circle cx={46} cy={12} r={2} fill="#2563EB" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        id: 'beijing' as StationStyle,
+                        label: t('sidebar.cityBeijing'),
+                        desc: t('sidebar.cityBeijingDesc'),
+                        preview: (
+                          <svg className="w-16 h-6" viewBox="0 0 64 24">
+                            <line x1={6} y1={12} x2={58} y2={12} stroke={isLight ? '#FFFFFF' : '#09090B'} strokeWidth={6.5} strokeLinecap="round" />
+                            <line x1={6} y1={12} x2={58} y2={12} stroke="#E11D48" strokeWidth={4} strokeLinecap="round" />
+                            <g transform="translate(19, 12)">
+                              <CityStationSymbol variant="beijing_basic" />
+                            </g>
+                            <g transform="translate(44, 12)">
+                              <CityStationSymbol variant="beijing_interchange" />
+                            </g>
+                          </svg>
+                        ),
+                      },
+                      {
+                        id: 'shanghai' as StationStyle,
+                        label: t('sidebar.cityShanghai'),
+                        desc: t('sidebar.cityShanghaiDesc'),
+                        preview: (
+                          <svg className="w-16 h-6" viewBox="0 0 64 24">
+                            <line x1={6} y1={12} x2={58} y2={12} stroke={isLight ? '#FFFFFF' : '#09090B'} strokeWidth={6} strokeLinecap="round" />
+                            <line x1={6} y1={12} x2={58} y2={12} stroke="#2563EB" strokeWidth={4} strokeLinecap="round" />
+                            <g transform="translate(19, 12)">
+                              <CityStationSymbol variant="shanghai_basic" />
+                            </g>
+                            <g transform="translate(44, 12)">
+                              <CityStationSymbol variant="shanghai_interchange" />
+                            </g>
+                          </svg>
+                        ),
+                      },
+                      {
+                        id: 'guangzhou' as StationStyle,
+                        label: t('sidebar.cityGuangzhou'),
+                        desc: t('sidebar.cityGuangzhouDesc'),
+                        preview: (
+                          <svg className="w-16 h-6" viewBox="-32 -12 64 24">
+                            <line x1={-28} y1={0} x2={28} y2={0} stroke="#16A34A" strokeWidth={7} strokeOpacity={0.22} strokeLinecap="round" />
+                            <line x1={-28} y1={0} x2={28} y2={0} stroke="#16A34A" strokeWidth={3.6} strokeLinecap="round" />
+                            <g transform="translate(0, 0) scale(0.75)">
+                              <CityStationSymbol variant="guangzhou_interchange" />
+                            </g>
+                          </svg>
+                        ),
+                      },
+                    ]
+                  ).map((city) => {
+                    const active = defaultCityPreset === city.id;
+                    return (
+                      <button
+                        key={city.id}
+                        type="button"
+                        onClick={() => onSelectCityPreset?.(city.id)}
+                        title={city.desc}
+                        className={`p-2 rounded-md border text-center transition-colors cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                          active ? btnActive : btnInactive
+                        }`}
+                      >
+                        {city.preview}
+                        <span className="text-[11px] leading-none">{city.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {onApplyCityPresetToAll && (stations.length > 0 || connections.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => onApplyCityPresetToAll(defaultCityPreset)}
+                    className={`w-full py-1.5 px-2.5 rounded-md border text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${btnInactive}`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{t('sidebar.applyPresetAll')}</span>
+                  </button>
+                )}
+              </div>
+
               {(svgImages.length > 0 || svgTexts.length > 0) && (
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
@@ -4783,83 +5643,111 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
 
-              {/* Quick Guide */}
-              <div className="p-4 space-y-3">
-                <h2 className={`text-xs font-semibold ${textHeading}`}>{t('sidebar.guideTitle')}</h2>
-                <div className={`space-y-2.5 ${textMuted}`}>
-                  <div className="flex gap-2.5">
-                    <span className="font-mono text-[11px] font-semibold w-4 shrink-0">01</span>
-                    <div>
-                      <span className={`font-medium ${textHeading}`}>{t('sidebar.guide1Title')}</span> — {t('sidebar.guide1Desc')}
-                    </div>
-                  </div>
-                  <div className="flex gap-2.5">
-                    <span className="font-mono text-[11px] font-semibold w-4 shrink-0">02</span>
-                    <div>
-                      <span className={`font-medium ${textHeading}`}>{t('sidebar.guide2Title')}</span> — {t('sidebar.guide2Desc')}
-                    </div>
-                  </div>
-                  <div className="flex gap-2.5">
-                    <span className="font-mono text-[11px] font-semibold w-4 shrink-0">03</span>
-                    <div>
-                      <span className={`font-medium ${textHeading}`}>{t('sidebar.guide3Title')}</span> — {t('sidebar.guide3Desc')}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Shortcuts & Stats Callouts */}
-              <div className="p-4 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold ${textHeading}`}>{t('sidebar.shortcutsTitle')}</span>
-                  {onOpenShortcuts && (
-                    <button
-                      type="button"
-                      onClick={onOpenShortcuts}
-                      className={`text-[11px] hover:underline cursor-pointer ${textMuted}`}
-                    >
-                      {t('sidebar.fullList')}
-                    </button>
-                  )}
-                </div>
-                <div className={`space-y-1 font-mono text-[11px] ${textMuted}`}>
-                  <div className="flex justify-between"><span>{t('sidebar.scSelectPan')}</span><span>V / S / H</span></div>
-                  <div className="flex justify-between"><span>{t('sidebar.scNodesConnect')}</span><span>N / M / C</span></div>
-                  <div className="flex justify-between"><span>{t('sidebar.scZOrder')}</span><span>[ / ]</span></div>
-                  <div className="flex justify-between"><span>{t('sidebar.scDeleteEsc')}</span><span>Del / Esc</span></div>
-                </div>
-
-                <div className="pt-1 space-y-1.5">
-                  {onOpenShortcuts && (
-                    <button
-                      type="button"
-                      onClick={onOpenShortcuts}
-                      className={`w-full py-1.5 px-2.5 rounded-md text-xs font-medium border flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${btnInactive}`}
-                    >
-                      <Keyboard className="w-3.5 h-3.5" />
-                      <span>{t('sidebar.openFullShortcuts')}</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => handleTabChange('stats')}
-                    className={`w-full py-1.5 px-2.5 rounded-md text-xs font-medium border flex items-center justify-between transition-colors cursor-pointer ${btnInactive}`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      <span>{t('sidebar.viewNetworkStats')}</span>
-                    </div>
-                    <span className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
-                      {t('sidebar.statsSummary', { lines: connections.length, stations: stations.length })}
+              {/* Show More Toggle in Overview */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowMoreOverview((prev) => !prev)}
+                  className={`w-full px-4 py-3 flex items-center justify-between text-left cursor-pointer transition-colors ${
+                    isLight ? 'hover:bg-zinc-50' : 'hover:bg-zinc-900/50'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <span className={`font-semibold text-xs block ${textHeading}`}>
+                      {showMoreOverview ? t('sidebar.showLess') : t('sidebar.showMore')}
                     </span>
-                  </button>
-                </div>
+                    <span className={`text-[10px] mt-0.5 block truncate ${textMuted}`}>
+                      {t('sidebar.moreOverviewHint')}
+                    </span>
+                  </div>
+                  <span className={textMuted}>
+                    {showMoreOverview ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </span>
+                </button>
+
+                {showMoreOverview && (
+                  <div className={`divide-y border-t ${borderCol} ${isLight ? 'divide-zinc-200' : 'divide-zinc-800'}`}>
+                    {/* Quick Guide */}
+                    <div className="p-4 space-y-3">
+                      <h2 className={`text-xs font-semibold ${textHeading}`}>{t('sidebar.guideTitle')}</h2>
+                      <div className={`space-y-2.5 ${textMuted}`}>
+                        <div className="flex gap-2.5">
+                          <span className="font-mono text-[11px] font-semibold w-4 shrink-0">01</span>
+                          <div>
+                            <span className={`font-medium ${textHeading}`}>{t('sidebar.guide1Title')}</span> — {t('sidebar.guide1Desc')}
+                          </div>
+                        </div>
+                        <div className="flex gap-2.5">
+                          <span className="font-mono text-[11px] font-semibold w-4 shrink-0">02</span>
+                          <div>
+                            <span className={`font-medium ${textHeading}`}>{t('sidebar.guide2Title')}</span> — {t('sidebar.guide2Desc')}
+                          </div>
+                        </div>
+                        <div className="flex gap-2.5">
+                          <span className="font-mono text-[11px] font-semibold w-4 shrink-0">03</span>
+                          <div>
+                            <span className={`font-medium ${textHeading}`}>{t('sidebar.guide3Title')}</span> — {t('sidebar.guide3Desc')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Shortcuts & Stats Callouts */}
+                    <div className="p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-semibold ${textHeading}`}>{t('sidebar.shortcutsTitle')}</span>
+                        {onOpenShortcuts && (
+                          <button
+                            type="button"
+                            onClick={onOpenShortcuts}
+                            className={`text-[11px] hover:underline cursor-pointer ${textMuted}`}
+                          >
+                            {t('sidebar.fullList')}
+                          </button>
+                        )}
+                      </div>
+                      <div className={`space-y-1 font-mono text-[11px] ${textMuted}`}>
+                        <div className="flex justify-between"><span>{t('sidebar.scSelectPan')}</span><span>V / S / H</span></div>
+                        <div className="flex justify-between"><span>{t('sidebar.scNodesConnect')}</span><span>N / M / C</span></div>
+                        <div className="flex justify-between"><span>{t('sidebar.scZOrder')}</span><span>[ / ]</span></div>
+                        <div className="flex justify-between"><span>{t('sidebar.scDeleteEsc')}</span><span>Del / Esc</span></div>
+                      </div>
+
+                      <div className="pt-1 space-y-1.5">
+                        {onOpenShortcuts && (
+                          <button
+                            type="button"
+                            onClick={onOpenShortcuts}
+                            className={`w-full py-1.5 px-2.5 rounded-md text-xs font-medium border flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${btnInactive}`}
+                          >
+                            <Keyboard className="w-3.5 h-3.5" />
+                            <span>{t('sidebar.openFullShortcuts')}</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleTabChange('stats')}
+                          className={`w-full py-1.5 px-2.5 rounded-md text-xs font-medium border flex items-center justify-between transition-colors cursor-pointer ${btnInactive}`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            <span>{t('sidebar.viewNetworkStats')}</span>
+                          </div>
+                          <span className={`text-[10px] font-mono tabular-nums ${textMuted}`}>
+                            {t('sidebar.statsSummary', { lines: connections.length, stations: stations.length })}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </>
       )}
+      </div>
     </aside>
   );
 };
