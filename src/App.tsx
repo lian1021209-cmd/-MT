@@ -35,6 +35,8 @@ import {
   Save,
 } from 'lucide-react';
 import { ShortestPathResult } from './utils/pathfinding';
+import { useI18n } from './i18n/I18nContext';
+import { LanguageSelector } from './components/LanguageSelector';
 
 const STORAGE_KEY = 'metro_network_data';
 
@@ -69,6 +71,7 @@ const loadSavedNetwork = (): SavedNetworkData | null => {
 };
 
 export default function App() {
+  const { t } = useI18n();
   const initialSavedRef = useRef<SavedNetworkData | null>(loadSavedNetwork());
   const [stations, setStations] = useState<Station[]>(() => initialSavedRef.current?.stations ?? DEMO_STATIONS);
   const [lines] = useState<MetroLine[]>(DEFAULT_LINES);
@@ -403,14 +406,16 @@ export default function App() {
 
   const handleUpdateStation = (updated: Station) => {
     pushHistory();
+    const cloned: Station = { ...updated };
     setStations((prev) =>
-      prev.map((st) => (st.id === updated.id ? updated : st))
+      prev.map((st) => (st.id === cloned.id ? cloned : st))
     );
   };
 
   const handleUpdateStationLive = (updated: Station) => {
+    const cloned: Station = { ...updated };
     setStations((prev) =>
-      prev.map((st) => (st.id === updated.id ? updated : st))
+      prev.map((st) => (st.id === cloned.id ? cloned : st))
     );
   };
 
@@ -745,11 +750,13 @@ export default function App() {
 
   const handleUpdateImage = (updated: CanvasImage) => {
     pushHistory();
-    setSvgImages((prev) => prev.map((img) => (img.id === updated.id ? updated : img)));
+    const cloned: CanvasImage = { ...updated };
+    setSvgImages((prev) => prev.map((img) => (img.id === cloned.id ? cloned : img)));
   };
 
   const handleUpdateImageLive = (updated: CanvasImage) => {
-    setSvgImages((prev) => prev.map((img) => (img.id === updated.id ? updated : img)));
+    const cloned: CanvasImage = { ...updated };
+    setSvgImages((prev) => prev.map((img) => (img.id === cloned.id ? cloned : img)));
   };
 
   const handleUpdateImageZIndex = (id: string, zIndex: number) => {
@@ -773,7 +780,7 @@ export default function App() {
     const center = viewportCenterRef.current;
     const newText: CanvasText = {
       id: `txt-${Date.now()}`,
-      content: '標註文字',
+      content: t('app.defaultTextContent'),
       x: Math.round(center.x),
       y: Math.round(center.y),
       fontSize: 20,
@@ -802,11 +809,13 @@ export default function App() {
 
   const handleUpdateText = (updated: CanvasText) => {
     pushHistory();
-    setSvgTexts((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    const cloned: CanvasText = { ...updated };
+    setSvgTexts((prev) => prev.map((t) => (t.id === cloned.id ? cloned : t)));
   };
 
   const handleUpdateTextLive = (updated: CanvasText) => {
-    setSvgTexts((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    const cloned: CanvasText = { ...updated };
+    setSvgTexts((prev) => prev.map((t) => (t.id === cloned.id ? cloned : t)));
   };
 
   const handleUpdateTextZIndex = (id: string, zIndex: number) => {
@@ -841,7 +850,7 @@ export default function App() {
 
   // Clear Canvas
   const handleClearCanvas = () => {
-    if (window.confirm('確定要清空畫布上的所有節點、連線、圖片與文字嗎？')) {
+    if (window.confirm(t('app.confirmClear'))) {
       pushHistory();
       setStations([]);
       setConnections([]);
@@ -878,7 +887,7 @@ export default function App() {
   // Export JSON
   const handleExportJSON = () => {
     const data = {
-      name: '地鐵路網繪製資料',
+      name: t('app.defaultExportName'),
       version: '1.0',
       exportedAt: new Date().toISOString(),
       activeColor,
@@ -905,7 +914,8 @@ export default function App() {
 
   return (
     <div
-      className={`flex flex-col h-screen w-screen overflow-hidden font-sans transition-colors ${
+      translate="no"
+      className={`notranslate flex flex-col h-screen w-screen overflow-hidden font-sans transition-colors ${
         isLight ? 'bg-[#FAFAFA] text-zinc-900' : 'bg-[#09090B] text-zinc-100'
       }`}
     >
@@ -921,7 +931,7 @@ export default function App() {
         <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
           <TrainTrack className="w-4 h-4 text-zinc-900 dark:text-zinc-100" />
           <span className="text-sm font-semibold tracking-tight">
-            地鐵路網繪製器
+            {t('app.title')}
           </span>
         </div>
 
@@ -942,7 +952,7 @@ export default function App() {
                 : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
-            屬性檢視
+            {t('app.tab.inspector')}
           </button>
           <button
             type="button"
@@ -955,7 +965,7 @@ export default function App() {
                 : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
-            路徑規劃
+            {t('app.tab.routing')}
           </button>
           <button
             type="button"
@@ -968,19 +978,21 @@ export default function App() {
                 : 'border-transparent hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
-            路網統計
+            {t('app.tab.stats')}
           </button>
           <button
             type="button"
             onClick={() => setIsShortcutsOpen(true)}
             className="py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 border-b-2 border-transparent hover:text-zinc-900 dark:hover:text-zinc-200"
           >
-            快捷鍵
+            {t('app.tab.shortcuts')}
           </button>
         </nav>
 
-        {/* Zone 3: Theme Switch, Save & Primary Export Action */}
+        {/* Zone 3: Language, Theme Switch, Save & Primary Export Action */}
         <div className="flex items-center gap-2.5 shrink-0">
+          <LanguageSelector theme={effectiveTheme} />
+
           {/* Theme Segmented Control */}
           <div
             className={`flex items-center p-0.5 rounded-md border text-xs ${
@@ -999,10 +1011,10 @@ export default function App() {
                   ? 'text-zinc-500 hover:text-zinc-900'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title="淺色主題"
+              title={t('app.theme.lightTip')}
             >
               <Sun className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">亮</span>
+              <span className="hidden sm:inline">{t('app.theme.light')}</span>
             </button>
 
             <button
@@ -1017,10 +1029,10 @@ export default function App() {
                   ? 'text-zinc-500 hover:text-zinc-900'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title="深色主題"
+              title={t('app.theme.darkTip')}
             >
               <Moon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">暗</span>
+              <span className="hidden sm:inline">{t('app.theme.dark')}</span>
             </button>
 
             <button
@@ -1035,10 +1047,10 @@ export default function App() {
                   ? 'text-zinc-500 hover:text-zinc-900'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
-              title="自動時控 (06:00-18:00 淺色，其餘深色)"
+              title={t('app.theme.autoTip')}
             >
               <Clock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">自動</span>
+              <span className="hidden sm:inline">{t('app.theme.auto')}</span>
             </button>
           </div>
 
@@ -1051,15 +1063,15 @@ export default function App() {
                 ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
-            title="系統每 30 秒自動儲存，點擊立即儲存"
+            title={t('app.saveTip')}
           >
             <Save className="w-3.5 h-3.5" />
             <span className="font-mono text-[11px] tabular-nums">
               {isSaving
-                ? '儲存中'
+                ? t('app.saving')
                 : lastSavedTime
                 ? lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : '儲存'}
+                : t('app.save')}
             </span>
           </button>
 
@@ -1075,10 +1087,10 @@ export default function App() {
                 ? 'bg-zinc-900 hover:bg-zinc-800 text-white'
                 : 'bg-zinc-100 hover:bg-white text-zinc-900'
             }`}
-            title="開啟匯出面板 (PDF / PNG / JSON)"
+            title={t('app.exportTip')}
           >
             <Download className="w-3.5 h-3.5" />
-            <span>匯出</span>
+            <span>{t('app.export')}</span>
           </button>
         </div>
       </header>
@@ -1327,6 +1339,7 @@ export default function App() {
             }
           }}
           onUpdateStation={handleUpdateStation}
+          onUpdateStationLive={handleUpdateStationLive}
           onDeleteStation={handleDeleteStation}
           onUpdateConnectionColor={handleUpdateConnectionColor}
           onUpdateConnectionRouteType={handleUpdateConnectionRouteType}
@@ -1340,11 +1353,14 @@ export default function App() {
           onUpdateStationZIndex={handleUpdateStationZIndex}
           onDeleteConnection={handleDeleteConnection}
           onUpdateImage={handleUpdateImage}
+          onUpdateImageLive={handleUpdateImageLive}
           onUpdateImageZIndex={handleUpdateImageZIndex}
           onDeleteImage={handleDeleteImage}
           onUpdateText={handleUpdateText}
+          onUpdateTextLive={handleUpdateTextLive}
           onUpdateTextZIndex={handleUpdateTextZIndex}
           onDeleteText={handleDeleteText}
+          onRecordHistory={pushHistory}
           theme={effectiveTheme}
           onClose={() => {
             setSelectedStationId(null);

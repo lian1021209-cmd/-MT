@@ -23,6 +23,7 @@ import {
   triggerCsvDownload,
   CsvExportScope,
 } from '../utils/exportCsv';
+import { useI18n } from '../i18n/I18nContext';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   onExportJSON,
   initialFormat = 'pdf',
 }) => {
+  const { t } = useI18n();
   const isLight = theme === 'light';
 
   const [exportFormat, setExportFormat] = useState<'pdf' | 'png' | 'csv'>(initialFormat);
@@ -289,10 +291,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${borderCol}`}>
           <div>
             <h2 className={`text-base font-semibold tracking-tight ${textHeading}`}>
-              匯出路網
+              {t('export.title')}
             </h2>
             <p className={`text-xs mt-0.5 ${textMuted}`}>
-              向量 PDF、高解析 PNG 圖片、CSV 表格或結構化 JSON 資料
+              {t('export.subtitle')}
             </p>
           </div>
 
@@ -302,7 +304,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             className={`p-1.5 rounded-md transition-colors cursor-pointer ${
               isLight ? 'hover:bg-zinc-100 text-zinc-400 hover:text-zinc-800' : 'hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100'
             }`}
-            title="關閉"
+            title={t('export.closeTip')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -323,7 +325,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>PDF 向量</span>
+              <span>PDF</span>
             </button>
 
             <button
@@ -338,7 +340,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5" />
-              <span>PNG 圖片</span>
+              <span>PNG</span>
             </button>
 
             <button
@@ -353,19 +355,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               }`}
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>CSV 表格</span>
+              <span>CSV</span>
             </button>
           </div>
 
           {exportFormat === 'csv' ? (
             <span className={`font-mono text-[11px] tabular-nums ${textMuted}`}>
-              {csvData.rows.length} 筆資料 · {csvData.headers.length} 欄 · UTF-8 BOM
+              {t('export.csvCounts', { nodes: stations.length, conns: connections.length })} · UTF-8 BOM
             </span>
           ) : (
             imgDimensions && (
               <span className={`font-mono text-[11px] tabular-nums ${textMuted}`}>
                 {exportFormat === 'pdf'
-                  ? `${imgDimensions.width} × ${imgDimensions.height} pt · ${pageSize === 'fit' ? '自適應' : pageSize.toUpperCase()}`
+                  ? `${imgDimensions.width} × ${imgDimensions.height} pt · ${pageSize === 'fit' ? 'FIT' : pageSize.toUpperCase()}`
                   : `${imgDimensions.width * scale} × ${imgDimensions.height * scale} · ${scale}×`}
               </span>
             )
@@ -378,28 +380,28 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             {/* CSV Scope Selector + Stats */}
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div className="space-y-1.5 flex-1">
-                <label className={`text-xs font-medium block ${textHeading}`}>匯出資料內容</label>
+                <label className={`text-xs font-medium block ${textHeading}`}>{t('export.csvScopeLabel')}</label>
                 <div className={`${segContainer} grid-cols-3`}>
                   <button
                     type="button"
                     onClick={() => setCsvScope('all')}
                     className={segBtn(csvScope === 'all')}
                   >
-                    合併全部 ({stations.length + connections.length})
+                    {t('export.csvAll')} ({stations.length + connections.length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setCsvScope('stations')}
                     className={segBtn(csvScope === 'stations')}
                   >
-                    僅節點 ({stations.length})
+                    {t('export.csvNodes')} ({stations.length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setCsvScope('connections')}
                     className={segBtn(csvScope === 'connections')}
                   >
-                    僅連線 ({connections.length})
+                    {t('export.csvConns')} ({connections.length})
                   </button>
                 </div>
               </div>
@@ -413,9 +415,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     ? 'bg-white hover:bg-zinc-50 text-zinc-700 border-zinc-200'
                     : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-800'
                 }`}
-                title="分別下載 stations 與 connections 兩份獨立 CSV"
+                title={t('export.csvSplitDesc')}
               >
-                雙檔分開下載
+                {t('export.csvSplit')}
               </button>
             </div>
 
@@ -426,15 +428,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   isLight ? 'bg-zinc-50 text-zinc-600' : 'bg-zinc-900/60 text-zinc-400'
                 }`}
               >
-                <span>欄位預覽 (含 Excel UTF-8 BOM 防亂碼與坐標／長度統計)</span>
+                <span>{t('export.csvPreviewTitle')}</span>
                 <span className="font-mono tabular-nums">
-                  顯示前 {Math.min(8, csvData.rows.length)} / {csvData.rows.length} 筆
+                  {Math.min(8, csvData.rows.length)} / {csvData.rows.length}
                 </span>
               </div>
 
               {csvData.rows.length === 0 ? (
                 <div className={`py-10 text-center text-xs ${textMuted}`}>
-                  目前畫布尚無節點或連線資料可匯出
+                  {t('export.csvEmpty')}
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-56">
@@ -448,7 +450,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                         ))}
                         {csvData.headers.length > 8 && (
                           <th className={`px-2.5 py-1.5 font-normal whitespace-nowrap ${textMuted}`}>
-                            +{csvData.headers.length - 8} 欄
+                            +{csvData.headers.length - 8}
                           </th>
                         )}
                       </tr>
@@ -482,7 +484,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
 
             <p className={`text-[11px] leading-relaxed ${textMuted}`}>
-              支援直接以 Microsoft Excel、Google Sheets、QGIS 或 Python Pandas 開啟，連線資料已自動關聯起終點坐標 (from_x, from_y, to_x, to_y) 與計算線段長度 (segment_length)。
+              {t('export.footerNote')}
             </p>
           </div>
         ) : (
@@ -500,7 +502,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {isGenerating ? (
                 <div className={`flex flex-col items-center gap-2 text-xs ${textMuted}`}>
                   <span className="w-4 h-4 border-2 border-zinc-400/30 border-t-zinc-500 rounded-full animate-spin" />
-                  <span>產生預覽中...</span>
+                  <span>...</span>
                 </div>
               ) : previewUrl ? (
                 <img
@@ -509,7 +511,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   className="max-h-full max-w-full object-contain rounded"
                 />
               ) : (
-                <span className={`text-xs ${textMuted}`}>畫布尚無路網資料</span>
+                <span className={`text-xs ${textMuted}`}>{t('export.csvEmpty')}</span>
               )}
             </div>
 
@@ -517,32 +519,32 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* 1. Scope */}
               <div className="space-y-1.5">
-                <label className={`text-xs font-medium block ${textHeading}`}>匯出範圍</label>
+                <label className={`text-xs font-medium block ${textHeading}`}>{t('export.scopeLabel')}</label>
                 <div className={`${segContainer} grid-cols-2`}>
                   <button type="button" onClick={() => setScope('full')} className={segBtn(scope === 'full')}>
-                    完整路網
+                    {t('export.scopeAll')}
                   </button>
                   <button type="button" onClick={() => setScope('viewport')} className={segBtn(scope === 'viewport')}>
-                    目前視野
+                    {t('export.scopeSelected')}
                   </button>
                 </div>
               </div>
 
               {/* 2. Background */}
               <div className="space-y-1.5">
-                <label className={`text-xs font-medium block ${textHeading}`}>背景</label>
+                <label className={`text-xs font-medium block ${textHeading}`}>{t('export.bgLabel')}</label>
                 <div className={`${segContainer} grid-cols-2`}>
                   <button type="button" onClick={() => setBackground('theme')} className={segBtn(background === 'theme')}>
-                    跟隨主題
+                    {t('app.theme.auto')}
                   </button>
                   <button type="button" onClick={() => setBackground('white')} className={segBtn(background === 'white')}>
-                    純白
+                    {t('export.bgLight')}
                   </button>
                   <button type="button" onClick={() => setBackground('dark')} className={segBtn(background === 'dark')}>
-                    深色
+                    {t('export.bgDark')}
                   </button>
                   <button type="button" onClick={() => setBackground('transparent')} className={segBtn(background === 'transparent')}>
-                    透明
+                    {t('export.bgTransparent')}
                   </button>
                 </div>
               </div>
@@ -551,20 +553,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {exportFormat === 'pdf' ? (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className={`text-xs font-medium ${textHeading}`}>紙張規格</label>
+                    <label className={`text-xs font-medium ${textHeading}`}>{t('export.paperLabel')}</label>
                     {pageSize !== 'fit' && (
                       <button
                         type="button"
                         onClick={() => setOrientation((prev) => (prev === 'landscape' ? 'portrait' : 'landscape'))}
                         className={`text-[11px] underline cursor-pointer ${textMuted} hover:text-zinc-900 dark:hover:text-zinc-100`}
                       >
-                        {orientation === 'landscape' ? '橫向' : orientation === 'portrait' ? '直向' : '自動方向'}
+                        {orientation === 'landscape' ? 'Landscape' : orientation === 'portrait' ? 'Portrait' : t('sidebar.auto')}
                       </button>
                     )}
                   </div>
                   <div className={`${segContainer} grid-cols-3`}>
                     {[
-                      { id: 'fit', label: '自適應' },
+                      { id: 'fit', label: t('sidebar.auto') },
                       { id: 'a4', label: 'A4' },
                       { id: 'a3', label: 'A3' },
                     ].map((item) => (
@@ -581,7 +583,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <label className={`text-xs font-medium block ${textHeading}`}>解析度倍率</label>
+                  <label className={`text-xs font-medium block ${textHeading}`}>{t('export.scaleLabel')}</label>
                   <div className={`${segContainer} grid-cols-3`}>
                     {[
                       { value: 1, label: '1×' },
@@ -617,7 +619,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               }`}
             >
               <FileCode className="w-3.5 h-3.5" />
-              <span>匯出 JSON</span>
+              <span>{t('export.jsonBtn')}</span>
             </button>
 
             {exportFormat !== 'csv' && (
@@ -629,10 +631,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     ? 'bg-white hover:bg-zinc-50 text-zinc-700 border-zinc-200'
                     : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-800'
                 }`}
-                title="一鍵下載節點與連線完整 CSV 表格"
+                title={t('export.csvAllDesc', { nodes: stations.length, conns: connections.length })}
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>匯出 CSV</span>
+                <span>{t('export.csvDownloadBtn')}</span>
               </button>
             )}
           </div>
@@ -653,12 +655,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {csvCopied ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-emerald-500" />
-                      <span className="text-emerald-600 dark:text-emerald-400">已複製</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{t('export.csvCopiedBtn')}</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      <span>複製 CSV</span>
+                      <span>{t('export.csvCopyBtn')}</span>
                     </>
                   )}
                 </button>
@@ -678,12 +680,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {csvSuccess ? (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>已下載 CSV</span>
+                      <span>{t('export.csvDownloadBtn')}</span>
                     </>
                   ) : (
                     <>
                       <Download className="w-3.5 h-3.5" />
-                      <span>下載 CSV</span>
+                      <span>{t('export.csvDownloadBtn')}</span>
                     </>
                   )}
                 </button>
@@ -701,7 +703,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   }`}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>新分頁預覽</span>
+                  <span>{t('export.pdfPreviewBtn')}</span>
                 </button>
 
                 <button
@@ -719,17 +721,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {isExportingPdf ? (
                     <>
                       <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-                      <span>產生中...</span>
+                      <span>...</span>
                     </>
                   ) : pdfSuccess ? (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>已下載 PDF</span>
+                      <span>{t('export.pdfDownloadBtn')}</span>
                     </>
                   ) : (
                     <>
                       <Download className="w-3.5 h-3.5" />
-                      <span>下載 PDF</span>
+                      <span>{t('export.pdfDownloadBtn')}</span>
                     </>
                   )}
                 </button>
@@ -748,12 +750,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {copied ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-emerald-500" />
-                      <span className="text-emerald-600 dark:text-emerald-400">已複製</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{t('export.pngCopiedBtn')}</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      <span>複製圖片</span>
+                      <span>{t('export.pngCopyBtn')}</span>
                     </>
                   )}
                 </button>
@@ -773,12 +775,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {pngSuccess ? (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>已下載 PNG</span>
+                      <span>{t('export.pngDownloadBtn')}</span>
                     </>
                   ) : (
                     <>
                       <Download className="w-3.5 h-3.5" />
-                      <span>下載 PNG</span>
+                      <span>{t('export.pngDownloadBtn')}</span>
                     </>
                   )}
                 </button>

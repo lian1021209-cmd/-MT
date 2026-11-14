@@ -10,6 +10,7 @@ import {
   AlertCircle,
   ArrowUpRight,
 } from 'lucide-react';
+import { useI18n } from '../i18n/I18nContext';
 
 export interface NetworkStatsPanelProps {
   stations: Station[];
@@ -101,6 +102,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
   theme,
   onSelectStation,
 }) => {
+  const { t } = useI18n();
   const isLight = theme === 'light';
   const [metricMode, setMetricMode] = useState<'length' | 'count'>('length');
   const [hoveredColor, setHoveredColor] = useState<string | null>(null);
@@ -304,37 +306,37 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
       <div className="p-4 space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className={`text-sm font-semibold tracking-tight ${textHeading}`}>
-            路網統計
+            {t('stats.title')}
           </h2>
           <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
-            {colorStats.length} 條路線
+            {colorStats.length} {t('stats.lines')}
           </span>
         </div>
 
         {/* 3-Column KPI Strip separated by hairlines */}
         <div className={`grid grid-cols-3 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
           <div className="p-2.5">
-            <div className={`text-[11px] ${textMuted}`}>站點</div>
+            <div className={`text-[11px] ${textMuted}`}>{t('stats.stations')}</div>
             <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
               {stationStats.total}
             </div>
             <div className={`text-[10px] font-mono tabular-nums mt-0.5 ${textMuted}`}>
-              營運 {stationStats.operational}
+              {t('stats.regular')} {stationStats.operational}
             </div>
           </div>
 
           <div className="p-2.5">
-            <div className={`text-[11px] ${textMuted}`}>連線</div>
+            <div className={`text-[11px] ${textMuted}`}>{t('stats.connections')}</div>
             <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
               {connections.length}
             </div>
             <div className={`text-[10px] font-mono tabular-nums mt-0.5 ${textMuted}`}>
-              換乘 {stationStats.interchange}
+              {t('stats.hubs')} {stationStats.interchange}
             </div>
           </div>
 
           <div className="p-2.5">
-            <div className={`text-[11px] ${textMuted}`}>總里程</div>
+            <div className={`text-[11px] ${textMuted}`}>{t('stats.totalLength')}</div>
             <div className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
               {totalLength >= 1000 ? `${(totalLength / 1000).toFixed(1)}k` : totalLength}
             </div>
@@ -347,9 +349,9 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
         {/* Station Distribution Bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-[11px]">
-            <span className={textMuted}>車站組成</span>
+            <span className={textMuted}>{t('stats.composition')}</span>
             <span className={`font-mono tabular-nums ${textMuted}`}>
-              換乘率 {stationStats.operational > 0 ? `${Math.round((stationStats.interchange / stationStats.operational) * 100)}%` : '0%'}
+              {t('stats.hubs')} {stationStats.operational > 0 ? `${Math.round((stationStats.interchange / stationStats.operational) * 100)}%` : '0%'}
             </span>
           </div>
 
@@ -359,34 +361,34 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                 <div
                   style={{ width: `${(stationStats.regular / stationStats.total) * 100}%` }}
                   className="bg-zinc-900 dark:bg-zinc-200 transition-all"
-                  title={`普通站: ${stationStats.regular}`}
+                  title={`${t('stats.typeRegular')}: ${stationStats.regular}`}
                 />
                 <div
                   style={{ width: `${(stationStats.interchange / stationStats.total) * 100}%` }}
                   className="bg-indigo-500 transition-all"
-                  title={`換乘站: ${stationStats.interchange}`}
+                  title={`${t('stats.typeInterchange')}: ${stationStats.interchange}`}
                 />
                 <div
                   style={{ width: `${(stationStats.virtual / stationStats.total) * 100}%` }}
                   className="bg-zinc-400 dark:bg-zinc-600 transition-all"
-                  title={`虛擬節點: ${stationStats.virtual}`}
+                  title={`${t('stats.typeVirtual')}: ${stationStats.virtual}`}
                 />
               </>
             )}
           </div>
 
           <div className={`flex items-center gap-3 text-[11px] tabular-nums ${textMuted}`}>
-            <span>普通 {stationStats.regular}</span>
+            <span>{t('stats.typeRegular')} {stationStats.regular}</span>
             <span aria-hidden="true">·</span>
-            <span>換乘 {stationStats.interchange}</span>
+            <span>{t('stats.typeInterchange')} {stationStats.interchange}</span>
             <span aria-hidden="true">·</span>
-            <span>轉折 {stationStats.virtual}</span>
+            <span>{t('stats.typeVirtual')} {stationStats.virtual}</span>
           </div>
 
           {stationStats.isolated > 0 && (
             <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 pt-1">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>有 {stationStats.isolated} 個車站尚未建立任何連線</span>
+              <span>{t('stats.noConnections')} ({stationStats.isolated})</span>
             </div>
           )}
         </div>
@@ -395,31 +397,31 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
       {/* 2. Critical Transfer Hubs */}
       <div className="p-4 space-y-3">
         <div className="flex items-baseline justify-between">
-          <h3 className={`text-xs font-semibold ${textHeading}`}>建議關鍵轉乘站</h3>
+          <h3 className={`text-xs font-semibold ${textHeading}`}>{t('stats.topHubs')}</h3>
           <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
-            {criticalTransferHubs.length} 站入選
+            {criticalTransferHubs.length}
           </span>
         </div>
 
         {/* Summary Strip */}
         <div className={`grid grid-cols-2 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
           <div className="px-2.5 py-2 flex items-center justify-between">
-            <span className={`text-[11px] ${textMuted}`}>最高連接數</span>
+            <span className={`text-[11px] ${textMuted}`}>{t('stats.connections')}</span>
             <span className={`font-mono font-semibold tabular-nums ${textHeading}`}>
-              {maxNodeDegree} 段
+              {t('stats.segmentCount', { count: maxNodeDegree })}
             </span>
           </div>
           <div className="px-2.5 py-2 flex items-center justify-between">
-            <span className={`text-[11px] ${textMuted}`}>&gt;3 線交會</span>
+            <span className={`text-[11px] ${textMuted}`}>&gt;3 {t('stats.lines')}</span>
             <span className={`font-mono font-semibold tabular-nums ${textHeading}`}>
-              {overThreeLinesCount} 站
+              {overThreeLinesCount}
             </span>
           </div>
         </div>
 
         {criticalTransferHubs.length === 0 ? (
           <p className={`py-4 text-center text-[11px] ${textMuted}`}>
-            建立車站連線後將自動識別關鍵轉乘站。
+            {t('stats.emptyHubs')}
           </p>
         ) : (
           <div className={`divide-y border rounded-lg max-h-56 overflow-y-auto ${borderCol} ${divideCol}`}>
@@ -429,10 +431,10 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                 station.type === 'interchange' || station.type === 'interchange_3line';
 
               const reasons: string[] = [];
-              if (hasOverThreeLines) reasons.push(`超過 3 條線路 (${lineCount})`);
-              if (isHighestDegree) reasons.push(`最高連接數 (${connectionCount})`);
+              if (hasOverThreeLines) reasons.push(t('stats.hubMultiLine', { count: lineCount }));
+              if (isHighestDegree) reasons.push(t('stats.segmentCount', { count: connectionCount }));
               if (!station.isVirtual && !isMarkedInterchange && lineCount >= 2) {
-                reasons.push('建議設為換乘站');
+                reasons.push(t('stats.hubDesignated'));
               }
 
               return (
@@ -443,12 +445,14 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                   className={`w-full px-3 py-2.5 text-left transition-colors cursor-pointer group ${
                     isLight ? 'hover:bg-zinc-50' : 'hover:bg-zinc-900'
                   }`}
-                  title="點擊選取此站點"
+                  title={t('sidebar.clickLocate')}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={`text-xs font-medium truncate ${textHeading}`}>
-                        {station.isVirtual ? `虛擬節點 (${station.x}, ${station.y})` : station.name}
+                        {station.isVirtual
+                          ? t('stats.virtualPrefix', { x: station.x, y: station.y })
+                          : station.name}
                       </span>
                       {station.code && !station.isVirtual && (
                         <span className={`text-[10px] font-mono ${textMuted}`}>
@@ -459,7 +463,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
 
                     <div className="flex items-center gap-1 shrink-0">
                       <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
-                        {lineCount} 線 · {connectionCount} 段
+                        {t('stats.linesAndConns', { lines: lineCount, conns: connectionCount })}
                       </span>
                       {onSelectStation && (
                         <ArrowUpRight className={`w-3.5 h-3.5 ${textMuted} group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors`} />
@@ -495,14 +499,14 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
         )}
 
         <p className={`text-[10px] leading-relaxed ${textMuted}`}>
-          自動列出連接超過 3 條色彩線路，或擁有全網最高節點連接數之樞紐站點。
+          {t('stats.subtitle')}
         </p>
       </div>
 
       {/* 3. Line Color Share & Donut Chart */}
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className={`text-xs font-semibold ${textHeading}`}>各色路線佔比</h3>
+          <h3 className={`text-xs font-semibold ${textHeading}`}>{t('stats.lineDist')}</h3>
 
           <div
             className={`flex items-center p-0.5 rounded-md border text-[11px] ${
@@ -520,7 +524,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                   : textMuted
               }`}
             >
-              依長度
+              {t('stats.byLength')}
             </button>
             <button
               type="button"
@@ -533,14 +537,14 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                   : textMuted
               }`}
             >
-              依段數
+              {t('stats.bySegments')}
             </button>
           </div>
         </div>
 
         {colorStats.length === 0 ? (
           <p className={`py-6 text-center text-[11px] ${textMuted}`}>
-            尚未建立路線連線。
+            {t('stats.noConnections')}
           </p>
         ) : (
           <>
@@ -608,7 +612,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                       >
                         {metricMode === 'length'
                           ? `${(totalLength / 100).toFixed(1)} km`
-                          : `${connections.length} 段`}
+                          : t('stats.segmentCount', { count: connections.length })}
                       </text>
                       <text
                         x="90"
@@ -617,7 +621,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                         fill={isLight ? '#71717A' : '#A1A1AA'}
                         fontSize="9.5"
                       >
-                        {metricMode === 'length' ? '總估算里程' : '總連線區段'}
+                        {metricMode === 'length' ? t('stats.totalLength') : t('stats.connections')}
                       </text>
                     </>
                   )}
@@ -656,7 +660,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
                     </div>
 
                     <div className={`flex items-center justify-between text-[10px] font-mono tabular-nums mt-1 ${textMuted}`}>
-                      <span>{item.count} 段</span>
+                      <span>{t('stats.segmentCount', { count: item.count })}</span>
                       <span>
                         {item.length} · ~{(item.length / 100).toFixed(1)} km
                       </span>
@@ -671,10 +675,10 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
 
       {/* 4. Segment Distance Metrics */}
       <div className="p-4 space-y-2.5">
-        <h3 className={`text-xs font-semibold ${textHeading}`}>區間站距</h3>
+        <h3 className={`text-xs font-semibold ${textHeading}`}>{t('stats.segmentsList')}</h3>
         <div className={`grid grid-cols-2 divide-x border rounded-lg ${borderCol} ${divideCol}`}>
           <div className="p-2.5">
-            <div className={`text-[11px] ${textMuted}`}>平均站距</div>
+            <div className={`text-[11px] ${textMuted}`}>{t('stats.bySegments')}</div>
             <div className={`text-sm font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
               {avgSegmentLength}
             </div>
@@ -683,7 +687,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
             </div>
           </div>
           <div className="p-2.5">
-            <div className={`text-[11px] ${textMuted}`}>最長區間</div>
+            <div className={`text-[11px] ${textMuted}`}>{t('stats.topLongest', { count: 1 })}</div>
             <div className={`text-sm font-semibold font-mono tabular-nums mt-0.5 ${textHeading}`}>
               {longestSegment}
             </div>
@@ -693,7 +697,7 @@ export const NetworkStatsPanel: React.FC<NetworkStatsPanelProps> = ({
           </div>
         </div>
         <p className={`text-[10px] ${textMuted}`}>
-          依畫布幾何路徑計算（100 座標單位約合 1 公里）。
+          100 {t('stats.units')} ≈ 1 km
         </p>
       </div>
     </div>

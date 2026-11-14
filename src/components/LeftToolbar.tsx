@@ -10,7 +10,8 @@ import {
   Type,
 } from 'lucide-react';
 import { ToolMode, RouteType, EffectiveTheme, CanvasImage } from '../types/metro';
-import { ROUTE_TYPE_OPTIONS } from './Toolbar';
+import { getRouteTypeOptions } from './Toolbar';
+import { useI18n } from '../i18n/I18nContext';
 
 interface LeftToolbarProps {
   toolMode: ToolMode;
@@ -36,6 +37,8 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   theme = 'dark',
 }) => {
   const isLight = theme === 'light';
+  const { t } = useI18n();
+  const routeTypeOptions = getRouteTypeOptions(t);
   const [showRouteFlyout, setShowRouteFlyout] = useState(false);
   const flyoutRef = useRef<HTMLDivElement | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -58,7 +61,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !onAddImage) return;
-    const baseName = file.name.replace(/\.[^.]+$/, '') || 'SVG 圖片';
+    const baseName = file.name.replace(/\.[^.]+$/, '') || t('canvas.defaultImageName');
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
@@ -105,7 +108,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const activeOption = ROUTE_TYPE_OPTIONS.find((o) => o.type === activeRouteType) || ROUTE_TYPE_OPTIONS[0];
+  const activeOption = routeTypeOptions.find((o) => o.type === activeRouteType) || routeTypeOptions[0];
 
   const getToolButtonClass = (active: boolean) =>
     `w-12 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
@@ -120,7 +123,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
 
   return (
     <aside
-      aria-label="工具列"
+      aria-label={t('app.title')}
       className={`relative w-14 border-r flex flex-col items-center py-2.5 px-1 select-none shrink-0 h-full z-20 transition-colors ${
         isLight ? 'bg-white border-zinc-200' : 'bg-[#111113] border-zinc-800'
       }`}
@@ -143,10 +146,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             setShowRouteFlyout(false);
           }}
           className={getToolButtonClass(toolMode === 'select')}
-          title="選取 / 移動 (V) — 點擊選取或拖曳車站，按著空白畫布滑動"
+          title={t('leftToolbar.selectTip')}
         >
           <MousePointer className="w-4 h-4" />
-          <span className="text-[10px] font-medium leading-none">選取</span>
+          <span className="text-[10px] font-medium leading-none truncate max-w-[44px]">{t('leftToolbar.select')}</span>
         </button>
 
         <button
@@ -156,10 +159,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             setShowRouteFlyout(false);
           }}
           className={getToolButtonClass(toolMode === 'marquee_select')}
-          title="框選多點 (S) — 拖曳滑鼠框選多個站點（按住 Shift 可加選）"
+          title={t('leftToolbar.marqueeTip')}
         >
           <BoxSelect className="w-4 h-4" />
-          <span className="text-[10px] font-medium leading-none">框選</span>
+          <span className="text-[10px] font-medium leading-none truncate max-w-[44px]">{t('leftToolbar.marquee')}</span>
         </button>
 
         <button
@@ -169,10 +172,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             setShowRouteFlyout(false);
           }}
           className={getToolButtonClass(toolMode === 'add_station')}
-          title="創造節點 (A) — 建立新車站後自動回到選取，按住 Shift 可連續建立"
+          title={t('leftToolbar.stationTip')}
         >
           <PlusCircle className="w-4 h-4" />
-          <span className="text-[10px] font-medium leading-none">車站</span>
+          <span className="text-[10px] font-medium leading-none truncate max-w-[44px]">{t('leftToolbar.station')}</span>
         </button>
 
         <button
@@ -182,10 +185,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             setShowRouteFlyout(false);
           }}
           className={getToolButtonClass(toolMode === 'add_virtual_node')}
-          title="虛擬節點 (X) — 建立非站點之轉折虛擬節點，按住 Shift 可連續建立"
+          title={t('leftToolbar.virtualNodeTip')}
         >
           <XCircle className="w-4 h-4" />
-          <span className="text-[10px] font-medium leading-none">轉折</span>
+          <span className="text-[10px] font-medium leading-none truncate max-w-[44px]">{t('leftToolbar.virtualNode')}</span>
         </button>
 
         {/* Connect Nodes Tool with route flyout */}
@@ -197,10 +200,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
               setShowRouteFlyout((v) => !v);
             }}
             className={`${getToolButtonClass(toolMode === 'connect')} relative`}
-            title="節點連接 (C) — 點選兩車站連線（按住 Shift 可連續連線）"
+            title={t('leftToolbar.connectTip')}
           >
             <GitCommit className="w-4 h-4" />
-            <span className="text-[10px] font-medium leading-none">連線</span>
+            <span className="text-[10px] font-medium leading-none truncate max-w-[44px]">{t('leftToolbar.connect')}</span>
             {toolMode === 'connect' && (
               <span
                 className={`absolute -bottom-0.5 -right-0.5 text-[9px] font-mono w-4 h-4 rounded flex items-center justify-center border ${
@@ -229,11 +232,11 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
                   isLight ? 'text-zinc-500 border-zinc-200' : 'text-zinc-400 border-zinc-800'
                 }`}
               >
-                <span>線段走線模式</span>
-                <span className="font-mono text-[10px] tabular-nums">6 種</span>
+                <span>{t('leftToolbar.routeModeTitle')}</span>
+                <span className="font-mono text-[10px] tabular-nums">{t('leftToolbar.routeCount', { count: 6 })}</span>
               </div>
               <div className="space-y-0.5">
-                {ROUTE_TYPE_OPTIONS.map((opt) => (
+                {routeTypeOptions.map((opt) => (
                   <button
                     key={opt.type}
                     type="button"
@@ -275,10 +278,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             imageFileInputRef.current?.click();
           }}
           className={getToolButtonClass(false)}
-          title="導入圖片 — 從本機上傳 PNG / JPG / SVG 作為畫布 SVG 圖層"
+          title={t('leftToolbar.importImageTip')}
         >
           <ImagePlus className="w-4 h-4" />
-          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap">導入圖片</span>
+          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap truncate max-w-[46px]">{t('leftToolbar.importImage')}</span>
         </button>
 
         <button
@@ -288,10 +291,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             onAddText?.();
           }}
           className={getToolButtonClass(false)}
-          title="增加文字 — 在畫布中心建立可自由變換的 SVG 文字"
+          title={t('leftToolbar.addTextTip')}
         >
           <Type className="w-4 h-4" />
-          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap">增加文字</span>
+          <span className="text-[9.5px] font-medium leading-none whitespace-nowrap truncate max-w-[46px]">{t('leftToolbar.addText')}</span>
         </button>
       </div>
 
@@ -307,7 +310,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             isLight ? 'border-zinc-300' : 'border-zinc-700'
           }`}
           style={{ backgroundColor: activeColor }}
-          title={`路線色彩設定 · 點擊開啟全色彩選擇器 (當前: ${activeColor})`}
+          title={t('leftToolbar.colorTip', { color: activeColor })}
         >
           <div className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
             <Pipette className="w-3.5 h-3.5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />

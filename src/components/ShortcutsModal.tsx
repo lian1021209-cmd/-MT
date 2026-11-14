@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Keyboard, X, Search } from 'lucide-react';
 import { EffectiveTheme } from '../types/metro';
+import { useI18n } from '../i18n/I18nContext';
+import { LocaleCode } from '../i18n/locales/types';
 
 export interface ShortcutItem {
   id: string;
@@ -8,142 +10,21 @@ export interface ShortcutItem {
   categoryLabel: string;
   keys: string[];
   description: string;
-  detail?: string;
 }
 
-const SHORTCUTS_DATA: ShortcutItem[] = [
-  {
-    id: 'help',
-    category: 'essential',
-    categoryLabel: '常用與控制',
-    keys: ['?'],
-    description: '開啟 / 關閉快捷鍵說明',
-    detail: '在畫布任意處按下 ? 或 F1 快速查閱操作說明',
-  },
-  {
-    id: 'esc',
-    category: 'essential',
-    categoryLabel: '常用與控制',
-    keys: ['Esc'],
-    description: '取消目前操作 / 取消選取',
-    detail: '取消未完成連線、清空選定項目或關閉視窗',
-  },
-  {
-    id: 'delete',
-    category: 'essential',
-    categoryLabel: '常用與控制',
-    keys: ['Del', 'Backspace'],
-    description: '刪除選取站點、路線或批次多選站點',
-  },
-  {
-    id: 'undo',
-    category: 'essential',
-    categoryLabel: '常用與控制',
-    keys: ['Ctrl / ⌘', '+', 'Z'],
-    description: '復原上一步操作',
-  },
-  {
-    id: 'redo',
-    category: 'essential',
-    categoryLabel: '常用與控制',
-    keys: ['Ctrl / ⌘', '+', 'Y'],
-    description: '重做下一步操作',
-  },
-  {
-    id: 'shift_drag',
-    category: 'selection',
-    categoryLabel: '選取與批次',
-    keys: ['S', '+', '拖曳'],
-    description: '框選多個站點',
-    detail: '切換至框選工具後直接拉出選取框',
-  },
-  {
-    id: 'shift_click',
-    category: 'selection',
-    categoryLabel: '選取與批次',
-    keys: ['Shift', '+', '點擊'],
-    description: '加選或移出選取站點',
-  },
-  {
-    id: 'tool_v',
-    category: 'selection',
-    categoryLabel: '選取與批次',
-    keys: ['V'],
-    description: '切換至「選取工具」',
-  },
-  {
-    id: 'tool_s',
-    category: 'selection',
-    categoryLabel: '選取與批次',
-    keys: ['S'],
-    description: '切換至「框選工具」',
-  },
-  {
-    id: 'tool_a',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['A'],
-    description: '切換至「創造車站節點」',
-  },
-  {
-    id: 'tool_x',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['X'],
-    description: '切換至「虛擬節點」',
-  },
-  {
-    id: 'tool_c',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['C'],
-    description: '切換至「節點連線」',
-  },
-  {
-    id: 'ctrl_align',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['Ctrl / ⌘'],
-    description: '8 方位磁吸與等距吸附',
-  },
-  {
-    id: 'svg_zorder_step',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['[', ']'],
-    description: '調整 SVG 重疊層級 (-10 ~ +10)',
-    detail: '按 ] 往上一層，按 [ 往下一層',
-  },
-  {
-    id: 'svg_zorder_extreme',
-    category: 'drawing',
-    categoryLabel: '節點與連線',
-    keys: ['Shift', '+', '[ / ]'],
-    description: '一鍵置底 (-10) / 置頂 (+10)',
-  },
-  {
-    id: 'label_drag',
-    category: 'label',
-    categoryLabel: '站名標籤',
-    keys: ['拖曳站名'],
-    description: '自由移動站名文字位置',
-    detail: '拖曳至空白處將自動繪製動態引線',
-  },
-  {
-    id: 'canvas_zoom',
-    category: 'navigation',
-    categoryLabel: '視角與畫布',
-    keys: ['滾輪', '/', '雙指'],
-    description: '縮放畫布視野 (10% ~ 500%)',
-  },
-  {
-    id: 'canvas_pan',
-    category: 'navigation',
-    categoryLabel: '視角與畫布',
-    keys: ['Space', '+', '拖曳'],
-    description: '平移無限畫布視野',
-  },
-];
+const KEYCAP_TEXT: Record<LocaleCode, { drag: string; click: string; dragLabel: string; scroll: string; pinch: string }> = {
+  'zh-TW': { drag: '拖曳', click: '點擊', dragLabel: '拖曳站名', scroll: '滾輪', pinch: '雙指' },
+  'zh-CN': { drag: '拖拽', click: '点击', dragLabel: '拖拽站名', scroll: '滚轮', pinch: '双指' },
+  en: { drag: 'Drag', click: 'Click', dragLabel: 'Drag Label', scroll: 'Scroll', pinch: 'Pinch' },
+  ja: { drag: 'ドラッグ', click: 'クリック', dragLabel: '駅名ドラッグ', scroll: 'ホイール', pinch: 'ピンチ' },
+  ko: { drag: '드래그', click: '클릭', dragLabel: '역명 드래그', scroll: '스크롤', pinch: '핀치' },
+  es: { drag: 'Arrastrar', click: 'Clic', dragLabel: 'Arrastrar etiqueta', scroll: 'Rueda', pinch: 'Pellizcar' },
+  fr: { drag: 'Glisser', click: 'Clic', dragLabel: 'Glisser nom', scroll: 'Molette', pinch: 'Pincer' },
+  de: { drag: 'Ziehen', click: 'Klick', dragLabel: 'Name ziehen', scroll: 'Scrollen', pinch: 'Zoom' },
+  pt: { drag: 'Arrastar', click: 'Clique', dragLabel: 'Arrastar nome', scroll: 'Roda', pinch: 'Pinça' },
+  ru: { drag: 'Перетащить', click: 'Клик', dragLabel: 'Тянуть имя', scroll: 'Колесо', pinch: 'Щипок' },
+  ar: { drag: 'سحب', click: 'نقر', dragLabel: 'سحب الاسم', scroll: 'تمرير', pinch: 'ضم' },
+};
 
 interface ShortcutsModalProps {
   isOpen: boolean;
@@ -156,6 +37,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
   onClose,
   theme = 'dark',
 }) => {
+  const { locale, t } = useI18n();
   const isLight = theme === 'light';
   const modalRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -189,31 +71,169 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
 
   const categories = useMemo(
     () => [
-      { id: 'all', label: '全部' },
-      { id: 'selection', label: '選取' },
-      { id: 'drawing', label: '繪圖與連線' },
-      { id: 'label', label: '標籤' },
-      { id: 'navigation', label: '畫布' },
-      { id: 'essential', label: '常用' },
+      { id: 'all', label: t('shortcuts.cat.all') },
+      { id: 'selection', label: t('shortcuts.cat.select') },
+      { id: 'drawing', label: t('shortcuts.cat.draw') },
+      { id: 'label', label: t('shortcuts.cat.label') },
+      { id: 'navigation', label: t('shortcuts.cat.canvas') },
+      { id: 'essential', label: t('shortcuts.cat.common') },
     ],
-    []
+    [t]
   );
+
+  const shortcutsData: ShortcutItem[] = useMemo(() => {
+    const k = KEYCAP_TEXT[locale] || KEYCAP_TEXT.en;
+    return [
+      {
+        id: 'help',
+        category: 'essential',
+        categoryLabel: t('shortcuts.cat.common'),
+        keys: ['?'],
+        description: t('shortcuts.item.help.desc'),
+      },
+      {
+        id: 'esc',
+        category: 'essential',
+        categoryLabel: t('shortcuts.cat.common'),
+        keys: ['Esc'],
+        description: t('shortcuts.item.cancel.desc'),
+      },
+      {
+        id: 'delete',
+        category: 'essential',
+        categoryLabel: t('shortcuts.cat.common'),
+        keys: ['Del', 'Backspace'],
+        description: t('shortcuts.item.delete.desc'),
+      },
+      {
+        id: 'undo',
+        category: 'essential',
+        categoryLabel: t('shortcuts.cat.common'),
+        keys: ['Ctrl / ⌘', '+', 'Z'],
+        description: t('shortcuts.item.undo.desc'),
+      },
+      {
+        id: 'redo',
+        category: 'essential',
+        categoryLabel: t('shortcuts.cat.common'),
+        keys: ['Ctrl / ⌘', '+', 'Y'],
+        description: t('shortcuts.item.redo.desc'),
+      },
+      {
+        id: 'shift_drag',
+        category: 'selection',
+        categoryLabel: t('shortcuts.cat.select'),
+        keys: ['S', '+', k.drag],
+        description: t('shortcuts.item.marquee.desc'),
+      },
+      {
+        id: 'shift_click',
+        category: 'selection',
+        categoryLabel: t('shortcuts.cat.select'),
+        keys: ['Shift', '+', k.click],
+        description: t('shortcuts.item.toggleSelect.desc'),
+      },
+      {
+        id: 'select_all',
+        category: 'selection',
+        categoryLabel: t('shortcuts.cat.select'),
+        keys: ['Ctrl / ⌘', '+', 'A'],
+        description: t('shortcuts.item.selectAll.desc'),
+      },
+      {
+        id: 'tool_v',
+        category: 'selection',
+        categoryLabel: t('shortcuts.cat.select'),
+        keys: ['V'],
+        description: t('shortcuts.item.selectTool.desc'),
+      },
+      {
+        id: 'tool_s',
+        category: 'selection',
+        categoryLabel: t('shortcuts.cat.select'),
+        keys: ['S'],
+        description: t('shortcuts.item.marquee.desc'),
+      },
+      {
+        id: 'tool_a',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['N'],
+        description: t('shortcuts.item.addStation.desc'),
+      },
+      {
+        id: 'tool_x',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['M'],
+        description: t('shortcuts.item.addVirtual.desc'),
+      },
+      {
+        id: 'tool_c',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['C'],
+        description: t('shortcuts.item.connect.desc'),
+      },
+      {
+        id: 'ctrl_align',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['Ctrl / ⌘'],
+        description: t('shortcuts.item.ctrlAlign.desc'),
+      },
+      {
+        id: 'svg_zorder_step',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['[', ']'],
+        description: t('shortcuts.item.layerStep.desc'),
+      },
+      {
+        id: 'svg_zorder_extreme',
+        category: 'drawing',
+        categoryLabel: t('shortcuts.cat.draw'),
+        keys: ['Shift', '+', '[ / ]'],
+        description: t('shortcuts.item.layerExtreme.desc'),
+      },
+      {
+        id: 'label_drag',
+        category: 'label',
+        categoryLabel: t('shortcuts.cat.label'),
+        keys: [k.dragLabel],
+        description: t('shortcuts.item.dragLabel.desc'),
+      },
+      {
+        id: 'canvas_zoom',
+        category: 'navigation',
+        categoryLabel: t('shortcuts.cat.canvas'),
+        keys: [k.scroll, '/', k.pinch],
+        description: t('shortcuts.item.zoom.desc'),
+      },
+      {
+        id: 'canvas_pan',
+        category: 'navigation',
+        categoryLabel: t('shortcuts.cat.canvas'),
+        keys: ['Space', '+', k.drag],
+        description: t('shortcuts.item.spacePan.desc'),
+      },
+    ];
+  }, [locale, t]);
 
   const filteredShortcuts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return SHORTCUTS_DATA.filter((item) => {
+    return shortcutsData.filter((item) => {
       const matchCategory = selectedCategory === 'all' || item.category === selectedCategory;
       if (!matchCategory) return false;
 
       if (!q) return true;
       return (
         item.description.toLowerCase().includes(q) ||
-        (item.detail && item.detail.toLowerCase().includes(q)) ||
         item.categoryLabel.toLowerCase().includes(q) ||
         item.keys.some((k) => k.toLowerCase().includes(q))
       );
     });
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, shortcutsData]);
 
   if (!isOpen) return null;
 
@@ -246,9 +266,12 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
         <div className={`flex items-center justify-between px-5 py-4 border-b shrink-0 ${borderCol}`}>
           <div className="flex items-center gap-2.5">
             <Keyboard className={`w-4 h-4 ${textMuted}`} />
-            <h2 id="shortcuts-modal-title" className={`text-base font-semibold tracking-tight ${textHeading}`}>
-              快捷鍵一覽
-            </h2>
+            <div>
+              <h2 id="shortcuts-modal-title" className={`text-base font-semibold tracking-tight ${textHeading}`}>
+                {t('shortcuts.title')}
+              </h2>
+              <p className={`text-[11px] ${textMuted}`}>{t('shortcuts.subtitle')}</p>
+            </div>
           </div>
 
           <button
@@ -257,7 +280,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
             className={`p-1 rounded-md transition-colors cursor-pointer ${
               isLight ? 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
-            title="關閉 (Esc)"
+            title={t('shortcuts.closeTip')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -272,7 +295,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋快捷鍵..."
+              placeholder={t('shortcuts.searchPlaceholder')}
               className={`w-full h-9 pl-8 pr-8 rounded-md text-xs border focus:outline-none transition-colors ${
                 isLight
                   ? 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:border-zinc-900'
@@ -319,7 +342,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
         <div className={`flex-1 overflow-y-auto divide-y ${divideCol}`}>
           {filteredShortcuts.length === 0 ? (
             <div className="py-12 text-center space-y-2">
-              <p className={`text-xs ${textMuted}`}>找不到與「{searchQuery}」相關的快捷鍵</p>
+              <p className={`text-xs ${textMuted}`}>{t('shortcuts.empty', { query: searchQuery })}</p>
               <button
                 type="button"
                 onClick={() => {
@@ -328,7 +351,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
                 }}
                 className={`text-xs underline cursor-pointer ${textHeading}`}
               >
-                重設篩選
+                {t('sidebar.searchReset')}
               </button>
             </div>
           ) : (
@@ -341,9 +364,6 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
                   <div className={`text-xs font-medium ${textHeading}`}>
                     {item.description}
                   </div>
-                  {item.detail && (
-                    <div className={`text-[11px] mt-0.5 ${textMuted}`}>{item.detail}</div>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
@@ -369,6 +389,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
               </div>
             ))
           )}
+        </div>
+
+        <div className={`px-5 py-2.5 border-t text-[11px] ${borderCol} ${textMuted}`}>
+          {t('shortcuts.footerTip')}
         </div>
       </div>
     </div>

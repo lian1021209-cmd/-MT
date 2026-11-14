@@ -9,6 +9,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { RouteType, EffectiveTheme } from '../types/metro';
+import { useI18n, type TranslateFn } from '../i18n/I18nContext';
 
 interface ToolbarProps {
   gridSnap: boolean;
@@ -42,6 +43,17 @@ export const ROUTE_TYPE_OPTIONS: { type: RouteType; label: string; desc: string;
   { type: 'free_curve', label: '自由繪製', desc: '自由繪製線段 (自繪軌跡，雙擊增減小節點拖曳調整)', icon: '〜' },
 ];
 
+export function getRouteTypeOptions(t: TranslateFn): { type: RouteType; label: string; desc: string; icon: string }[] {
+  return [
+    { type: '135_bend', label: t('route.135_bend.short'), desc: t('route.135_bend.desc'), icon: '⤡' },
+    { type: '90_ortho', label: t('route.90_ortho.short'), desc: t('route.90_ortho.desc'), icon: '⌍' },
+    { type: '90_rotated', label: t('route.90_rotated.short'), desc: t('route.90_rotated.desc'), icon: '◇' },
+    { type: 'straight', label: t('route.straight.short'), desc: t('route.straight.desc'), icon: '―' },
+    { type: 'any_angle', label: t('route.any_angle.short'), desc: t('route.any_angle.desc'), icon: '∠' },
+    { type: 'free_curve', label: t('route.free_curve.short'), desc: t('route.free_curve.desc'), icon: '〜' },
+  ];
+}
+
 export const Toolbar: React.FC<ToolbarProps> = ({
   gridSnap,
   onToggleGridSnap,
@@ -60,6 +72,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onRedo,
 }) => {
   const isLight = theme === 'light';
+  const { t } = useI18n();
 
   return (
     <div
@@ -93,10 +106,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'text-zinc-500 hover:text-zinc-900'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
-            title="平滑自由移動模式 — 按住 Ctrl 可八方虛線對齊其他節點"
+            title={t('shortcuts.item.ctrlAlign.desc')}
           >
             <Move className="w-3.5 h-3.5" />
-            <span>平滑</span>
+            <span>{t('canvas.smooth')}</span>
           </button>
 
           <button
@@ -113,10 +126,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'text-zinc-500 hover:text-zinc-900'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
-            title="網格吸附移動模式 — 車站節點移動時依格點吸附"
+            title={t('toolbar.snapTip')}
           >
             <Grid className="w-3.5 h-3.5" />
-            <span>吸附</span>
+            <span>{t('toolbar.snap')}</span>
           </button>
         </div>
 
@@ -143,7 +156,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     ? 'text-zinc-500 hover:text-zinc-900'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
-                title={`${size} 格點間距`}
+                title={t('canvas.snapGrid', { size })}
               >
                 {size}
               </button>
@@ -165,10 +178,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'bg-white text-zinc-600 border-zinc-200 hover:text-zinc-900 hover:bg-zinc-50'
                 : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-800'
             }`}
-            title="開啟對齊模式 (Ctrl) — 支援八方對齊與等距連線吸附"
+            title={t('toolbar.alignTip')}
           >
             <Crosshair className="w-3.5 h-3.5" />
-            <span>對齊</span>
+            <span>{t('toolbar.align')}</span>
             <span className="text-[10px] font-mono opacity-65">Ctrl</span>
           </button>
         )}
@@ -188,10 +201,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60 cursor-pointer'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 cursor-pointer'
             }`}
-            title="復原上一步 (Ctrl+Z / ⌘Z)"
+            title={`${t('toolbar.undo')} (Ctrl+Z / ⌘Z)`}
           >
             <Undo2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">復原</span>
+            <span className="hidden sm:inline">{t('toolbar.undo')}</span>
           </button>
 
           <button
@@ -205,10 +218,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60 cursor-pointer'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 cursor-pointer'
             }`}
-            title="重做下一步 (Ctrl+Y / ⌘Y / ⌘⇧Z)"
+            title={`${t('toolbar.redo')} (Ctrl+Y / ⌘Y / ⌘⇧Z)`}
           >
             <Redo2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">重做</span>
+            <span className="hidden sm:inline">{t('toolbar.redo')}</span>
           </button>
         </div>
       </div>
@@ -220,9 +233,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             isLight ? 'text-zinc-500' : 'text-zinc-400'
           }`}
         >
-          <span>{stationCount} 站</span>
+          <span>{t('sidebar.stopsCount', { count: stationCount })}</span>
           <span aria-hidden="true">·</span>
-          <span>{connectionCount} 段連線</span>
+          <span>{t('stats.segmentCount', { count: connectionCount })}</span>
         </div>
 
         <div className={`hidden md:block h-4 w-px ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
@@ -235,10 +248,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
-          title="載入台北捷運範例路網"
+          title={t('toolbar.demoTip')}
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>範例路網</span>
+          <span>{t('toolbar.demo')}</span>
         </button>
 
         <button
@@ -249,10 +262,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               ? 'text-zinc-500 hover:text-rose-600 hover:bg-rose-50'
               : 'text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30'
           }`}
-          title="清空畫布所有節點與連線"
+          title={t('toolbar.clearTip')}
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span>清空</span>
+          <span>{t('toolbar.clear')}</span>
         </button>
       </div>
     </div>

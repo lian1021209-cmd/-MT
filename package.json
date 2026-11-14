@@ -36,5 +36,19 @@
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "@types/express": "^4.17.21"
+  },
+  "build": {
+    "appId": "com.metro.network",
+    "productName": "地鐵路網繪製器",
+    "directories": {
+      "output": "dist-exe"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "portable"
+    }
   }
 }

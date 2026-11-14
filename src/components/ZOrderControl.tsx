@@ -12,6 +12,7 @@ import {
   MAX_Z_ORDER,
   clampZOrder,
 } from '../types/metro';
+import { useI18n } from '../i18n/I18nContext';
 
 interface ZOrderControlProps {
   value: number;
@@ -27,6 +28,7 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
   theme = 'dark',
 }) => {
   const isLight = theme === 'light';
+  const { t } = useI18n();
   const z = clampZOrder(value);
 
   const textMuted = isLight ? 'text-zinc-500' : 'text-zinc-400';
@@ -44,7 +46,7 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <span className={`text-xs font-semibold ${textHeading}`}>
-          SVG 重疊層級
+          {t('zOrder.title')}
         </span>
 
         <div className="flex items-center gap-2">
@@ -53,10 +55,10 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
               type="button"
               onClick={() => onChange(0)}
               className={`text-[11px] flex items-center gap-1 transition-colors cursor-pointer ${textMuted} hover:text-zinc-900 dark:hover:text-zinc-100`}
-              title="重設回預設層級 0"
+              title={t('zOrder.reset')}
             >
               <RotateCcw className="w-3 h-3" />
-              <span>歸零</span>
+              <span>{t('zOrder.reset')}</span>
             </button>
           )}
           <span
@@ -68,7 +70,7 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
                 : textMuted
             }`}
           >
-            {z === 0 ? '0 (預設)' : formatZ(z)}
+            {z === 0 ? t('zOrder.defaultZero') : formatZ(z)}
           </span>
         </div>
       </div>
@@ -80,10 +82,10 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
           onClick={() => onChange(MIN_Z_ORDER)}
           disabled={z <= MIN_Z_ORDER}
           className={`h-9 rounded-md border text-[11px] font-medium flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${btnBase}`}
-          title="移至最底層 (-10) · Shift+["
+          title={t('zOrder.bottomTip')}
         >
           <ArrowDownToLine className="w-3.5 h-3.5" />
-          <span className="leading-none">置底</span>
+          <span className="leading-none truncate max-w-full px-0.5">{t('zOrder.bottom')}</span>
         </button>
 
         <button
@@ -91,17 +93,17 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
           onClick={() => onChange(clampZOrder(z - 1))}
           disabled={z <= MIN_Z_ORDER}
           className={`h-9 rounded-md border text-[11px] font-medium flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${btnBase}`}
-          title="往下一層 (-1) · 快捷鍵 ["
+          title={t('zOrder.downTip')}
         >
           <ArrowDown className="w-3.5 h-3.5" />
-          <span className="leading-none">往下</span>
+          <span className="leading-none truncate max-w-full px-0.5">{t('zOrder.down')}</span>
         </button>
 
         <div
           className={`h-9 rounded-md border flex items-center justify-center px-1 ${
             isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-800'
           }`}
-          title="直接輸入 -10 到 10 的整數層級"
+          title="-10 ~ +10"
         >
           <input
             type="number"
@@ -124,10 +126,10 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
           onClick={() => onChange(clampZOrder(z + 1))}
           disabled={z >= MAX_Z_ORDER}
           className={`h-9 rounded-md border text-[11px] font-medium flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${btnBase}`}
-          title="往上一層 (+1) · 快捷鍵 ]"
+          title={t('zOrder.upTip')}
         >
           <ArrowUp className="w-3.5 h-3.5" />
-          <span className="leading-none">往上</span>
+          <span className="leading-none truncate max-w-full px-0.5">{t('zOrder.up')}</span>
         </button>
 
         <button
@@ -135,10 +137,10 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
           onClick={() => onChange(MAX_Z_ORDER)}
           disabled={z >= MAX_Z_ORDER}
           className={`h-9 rounded-md border text-[11px] font-medium flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${btnBase}`}
-          title="移至最上層 (+10) · Shift+]"
+          title={t('zOrder.topTip')}
         >
           <ArrowUpToLine className="w-3.5 h-3.5" />
-          <span className="leading-none">置頂</span>
+          <span className="leading-none truncate max-w-full px-0.5">{t('zOrder.top')}</span>
         </button>
       </div>
 
@@ -162,12 +164,12 @@ export const ZOrderControl: React.FC<ZOrderControlProps> = ({
 
       <p className={`text-[11px] leading-relaxed ${textMuted} border-t pt-2 ${borderCol}`}>
         {targetType === 'connection'
-          ? '調整線段在畫布的前後順序（+10 最上層，-10 最底層）。'
+          ? t('zOrder.targetConnection')
           : targetType === 'image'
-          ? '調整圖片在畫布的前後順序（+10 最上層，-10 最底層）。'
+          ? t('zOrder.targetImage')
           : targetType === 'text'
-          ? '調整文字在畫布的前後順序（+10 最上層，-10 最底層）。'
-          : '調整站點與標籤的前後重疊順序（+10 最上層，-10 最底層）。'}
+          ? t('zOrder.targetText')
+          : t('zOrder.targetStation')}
       </p>
     </div>
   );

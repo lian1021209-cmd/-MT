@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Check, Hash, X } from 'lucide-react';
 import { hexToHsv, hsvToHex, isValidHex, normalizeHex } from '../utils/color';
 import { EffectiveTheme } from '../types/metro';
+import { useI18n } from '../i18n/I18nContext';
 
 interface ColorModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export const ColorModal: React.FC<ColorModalProps> = ({
   theme = 'dark',
 }) => {
   const isLight = theme === 'light';
+  const { t } = useI18n();
   const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>(() =>
     hexToHsv(activeColor)
   );
@@ -176,7 +178,7 @@ export const ColorModal: React.FC<ColorModalProps> = ({
               style={{ backgroundColor: currentColorHex }}
             />
             <h3 className={`font-semibold text-sm ${textHeading}`}>
-              路線色彩選擇器
+              {t('colorModal.title')}
             </h3>
           </div>
           <button
@@ -187,7 +189,7 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                 ? 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
-            title="關閉 (Esc)"
+            title={t('colorModal.closeTip')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -232,7 +234,7 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                 background:
                   'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
               }}
-              title="選擇色相 (0° ~ 360°)"
+              title={`${t('colorModal.hue')} (0° ~ 360°)`}
             >
               <div
                 className="absolute top-1/2 -mt-2 -ml-2 w-4 h-4 rounded-full border-2 border-white shadow pointer-events-none"
@@ -282,14 +284,14 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                   : 'bg-zinc-100 hover:bg-white text-zinc-900'
               }`}
             >
-              套用
+              {t('colorModal.apply')}
             </button>
           </div>
 
           {/* 4. Recent 20 Colors */}
           <div className={`space-y-2 pt-3 border-t ${borderCol}`}>
             <div className="flex items-center justify-between text-xs">
-              <span className={`font-medium ${textHeading}`}>最近使用色</span>
+              <span className={`font-medium ${textHeading}`}>{t('colorModal.recent')}</span>
               <span className={`text-[11px] font-mono tabular-nums ${textMuted}`}>
                 {recentColors.length} / 20
               </span>
@@ -309,7 +311,7 @@ export const ColorModal: React.FC<ColorModalProps> = ({
                           ? 'border-zinc-200 text-zinc-300'
                           : 'border-zinc-800 text-zinc-700'
                       }`}
-                      title={`欄位 ${index + 1}`}
+                      title={`#${index + 1}`}
                     />
                   );
                 }

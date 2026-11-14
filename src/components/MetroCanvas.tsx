@@ -38,8 +38,10 @@ import {
   ArrowUpToLine,
   ArrowDownToLine,
   Layers,
-  RotateCcw
+  RotateCcw,
+  Check
 } from 'lucide-react';
+import { useI18n } from '../i18n/I18nContext';
 
 export interface AlignmentGuide {
   id: string;
@@ -163,6 +165,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   shortestPathResult,
   showShortestPathPreview = true,
 }) => {
+  const { t } = useI18n();
   const isLight = theme === 'light';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -222,6 +225,76 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     origDy: number;
     hasRecordedHistory?: boolean;
   } | null>(null);
+
+  // Inline Double-Click Station Rename Overlay State (IME-safe)
+  const [editingStationId, setEditingStationId] = useState<string | null>(null);
+  const [editingStationName, setEditingStationName] = useState('');
+  const editingStationOrigNameRef = useRef<string>('');
+  const isComposingInlineNameRef = useRef<boolean>(false);
+  const inlineHistoryRecordedRef = useRef<boolean>(false);
+  const inlineNameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const startInlineEditStation = (station: Station) => {
+    if (
+      station.isVirtual ||
+      toolMode === 'connect' ||
+      toolMode === 'pan' ||
+      toolMode === 'add_station' ||
+      toolMode === 'add_virtual_node'
+    ) {
+      return;
+    }
+    labelDragRef.current = null;
+    setDraggingLabelStationId(null);
+    dragInfoRef.current = null;
+    setDraggingStationId(null);
+
+    onSelectStation(station.id);
+    onSelectStationIds?.([station.id]);
+    onSelectConnection(null);
+    onSelectImage?.(null);
+    onSelectText?.(null);
+
+    editingStationOrigNameRef.current = station.name;
+    isComposingInlineNameRef.current = false;
+    inlineHistoryRecordedRef.current = false;
+    setEditingStationId(station.id);
+    setEditingStationName(station.name);
+
+    requestAnimationFrame(() => {
+      inlineNameInputRef.current?.focus();
+      inlineNameInputRef.current?.select();
+    });
+  };
+
+  const applyInlineStationName = (nextName: string, closeEditor: boolean) => {
+    if (!editingStationId) return;
+    const target = stations.find((s) => s.id === editingStationId);
+    if (target && nextName !== target.name) {
+      if (!inlineHistoryRecordedRef.current) {
+        onRecordHistory?.();
+        inlineHistoryRecordedRef.current = true;
+      }
+      onUpdateStation?.({ ...target, name: nextName });
+    }
+    if (closeEditor) {
+      setEditingStationId(null);
+      isComposingInlineNameRef.current = false;
+      inlineHistoryRecordedRef.current = false;
+    }
+  };
+
+  const cancelInlineEditStation = () => {
+    if (!editingStationId) return;
+    const target = stations.find((s) => s.id === editingStationId);
+    const orig = editingStationOrigNameRef.current;
+    if (target && target.name !== orig) {
+      onUpdateStation?.({ ...target, name: orig });
+    }
+    setEditingStationId(null);
+    isComposingInlineNameRef.current = false;
+    inlineHistoryRecordedRef.current = false;
+  };
 
   // Active 8-direction alignment guides during station dragging
   const [activeAlignmentGuides, setActiveAlignmentGuides] = useState<AlignmentGuide[]>([]);
@@ -758,7 +831,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             }
             const normalizedRot = normalizeSvgAngle(nextRot);
             onUpdateImage({ ...img, rotation: normalizedRot });
-            setTransformHudText(`旋轉 ${normalizedRot}°`);
+            setTransformHudText(`${t('sidebar.rotationAngle')} ${normalizedRot}°`);
           } else {
             const rad = -(info.origRotation * Math.PI) / 180;
             const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
@@ -770,14 +843,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.08
               );
               onUpdateImage({ ...img, scaleX: nextScaleX });
-              setTransformHudText(`水平 ${nextScaleX}×`);
+              setTransformHudText(`X ${nextScaleX}×`);
             } else if (info.handle === 'n' || info.handle === 's') {
               const nextScaleY = normalizeSvgScale(
                 Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
                 0.08
               );
               onUpdateImage({ ...img, scaleY: nextScaleY });
-              setTransformHudText(`垂直 ${nextScaleY}×`);
+              setTransformHudText(`Y ${nextScaleY}×`);
             } else if (e.shiftKey) {
               const nextScaleX = normalizeSvgScale(
                 Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
@@ -796,7 +869,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.08
               );
               onUpdateImage({ ...img, scale: nextScale });
-              setTransformHudText(`縮放 ${nextScale}×`);
+              setTransformHudText(`${t('canvas.scale')} ${nextScale}×`);
             }
           }
         }
@@ -825,7 +898,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             }
             const normalizedRot = normalizeSvgAngle(nextRot);
             onUpdateText({ ...txt, rotation: normalizedRot });
-            setTransformHudText(`旋轉 ${normalizedRot}°`);
+            setTransformHudText(`${t('sidebar.rotationAngle')} ${normalizedRot}°`);
           } else {
             const rad = -(info.origRotation * Math.PI) / 180;
             const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
@@ -837,14 +910,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.15
               );
               onUpdateText({ ...txt, scaleX: nextScaleX });
-              setTransformHudText(`水平 ${nextScaleX}×`);
+              setTransformHudText(`X ${nextScaleX}×`);
             } else if (info.handle === 'n' || info.handle === 's') {
               const nextScaleY = normalizeSvgScale(
                 Math.abs(localY) / Math.max(8, info.baseHalfH * info.origScale),
                 0.15
               );
               onUpdateText({ ...txt, scaleY: nextScaleY });
-              setTransformHudText(`垂直 ${nextScaleY}×`);
+              setTransformHudText(`Y ${nextScaleY}×`);
             } else if (e.shiftKey) {
               const nextScaleX = normalizeSvgScale(
                 Math.abs(localX) / Math.max(8, info.baseHalfW * info.origScale),
@@ -863,7 +936,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.15
               );
               onUpdateText({ ...txt, scale: nextScale });
-              setTransformHudText(`縮放 ${nextScale}×`);
+              setTransformHudText(`${t('canvas.scale')} ${nextScale}×`);
             }
           }
         }
@@ -936,7 +1009,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             }
             const normalizedRot = normalizeSvgAngle(nextRot);
             onUpdateStation({ ...st, rotation: normalizedRot });
-            setTransformHudText(`旋轉 ${normalizedRot}°`);
+            setTransformHudText(`${t('sidebar.rotationAngle')} ${normalizedRot}°`);
           } else {
             const rad = -(info.origRotation * Math.PI) / 180;
             const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
@@ -948,14 +1021,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.15
               );
               onUpdateStation({ ...st, scaleX: nextScaleX });
-              setTransformHudText(`水平比例 ${nextScaleX}×`);
+              setTransformHudText(`X ${nextScaleX}×`);
             } else if (info.handle === 'n' || info.handle === 's') {
               const nextScaleY = normalizeSvgScale(
                 Math.abs(localY) / Math.max(4, info.baseHalf * info.origScale),
                 0.15
               );
               onUpdateStation({ ...st, scaleY: nextScaleY });
-              setTransformHudText(`垂直比例 ${nextScaleY}×`);
+              setTransformHudText(`Y ${nextScaleY}×`);
             } else if (e.shiftKey) {
               const nextScaleX = normalizeSvgScale(
                 Math.abs(localX) / Math.max(4, info.baseHalf * info.origScale),
@@ -974,7 +1047,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 0.15
               );
               onUpdateStation({ ...st, scale: nextScale });
-              setTransformHudText(`縮放 ${nextScale}×`);
+              setTransformHudText(`${t('canvas.scale')} ${nextScale}×`);
             }
           }
         }
@@ -1012,7 +1085,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           } else {
             onUpdateStationsPos?.(updates);
           }
-          setTransformHudText(`群組旋轉 ${Math.round(deltaDeg)}°`);
+          setTransformHudText(`${t('sidebar.rotationAngle')} ${Math.round(deltaDeg)}°`);
         } else {
           let ratioX = 1;
           let ratioY = 1;
@@ -1020,20 +1093,20 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
           if (info.handle === 'e' || info.handle === 'w') {
             ratioX = Math.max(0.1, Math.abs(dx) / Math.max(8, info.halfW));
-            setTransformHudText(`群組水平 ${ratioX.toFixed(2)}×`);
+            setTransformHudText(`X ${ratioX.toFixed(2)}×`);
           } else if (info.handle === 'n' || info.handle === 's') {
             ratioY = Math.max(0.1, Math.abs(dy) / Math.max(8, info.halfH));
-            setTransformHudText(`群組垂直 ${ratioY.toFixed(2)}×`);
+            setTransformHudText(`Y ${ratioY.toFixed(2)}×`);
           } else if (e.shiftKey) {
             ratioX = Math.max(0.1, Math.abs(dx) / Math.max(8, info.halfW));
             ratioY = Math.max(0.1, Math.abs(dy) / Math.max(8, info.halfH));
-            setTransformHudText(`群組 ${ratioX.toFixed(2)}× · ${ratioY.toFixed(2)}×`);
+            setTransformHudText(`${ratioX.toFixed(2)}× · ${ratioY.toFixed(2)}×`);
           } else {
             const curDist = Math.max(8, Math.hypot(dx, dy));
             uniformRatio = Math.max(0.1, curDist / Math.max(8, info.startDist));
             ratioX = uniformRatio;
             ratioY = uniformRatio;
-            setTransformHudText(`群組縮放 ${uniformRatio.toFixed(2)}×`);
+            setTransformHudText(`${t('canvas.scale')} ${uniformRatio.toFixed(2)}×`);
           }
 
           const updates = info.initialStations.map((s) => ({
@@ -1258,7 +1331,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   targetPos: { x: finalTargetX, y: finalTargetY },
                   targetStation: nearbyOtherStation,
                   distance: targetDist,
-                  label: `等距: ${Math.round(targetDist)}`,
+                  label: t('canvas.equalDist', { dist: Math.round(targetDist) }),
                 };
 
                 activeEqualDistanceGuideRef.current = guide;
@@ -1419,7 +1492,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           y1: target.y,
           x2: Math.max(target.x, x) + 220,
           y2: target.y,
-          angleLabel: target.x < x ? '0° 水平對齊' : '180° 水平對齊',
+          angleLabel: target.x < x ? `0° ${t('canvas.alignH')}` : `180° ${t('canvas.alignH')}`,
         });
 
         const createVGuide = (target: Station, x: number, y: number): AlignmentGuide => ({
@@ -1430,7 +1503,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           y1: Math.min(target.y, y) - 220,
           x2: target.x,
           y2: Math.max(target.y, y) + 220,
-          angleLabel: target.y < y ? '90° 垂直對齊' : '270° 垂直對齊',
+          angleLabel: target.y < y ? `90° ${t('canvas.alignV')}` : `270° ${t('canvas.alignV')}`,
         });
 
         const createDiag45Guide = (target: Station, x: number, y: number): AlignmentGuide => {
@@ -1445,7 +1518,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             y1: midY - span,
             x2: midX + span,
             y2: midY + span,
-            angleLabel: x >= target.x ? '45° 斜向對齊' : '225° 斜向對齊',
+            angleLabel: x >= target.x ? `45° ${t('canvas.aligning')}` : `225° ${t('canvas.aligning')}`,
           };
         };
 
@@ -1461,7 +1534,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             y1: midY + span,
             x2: midX + span,
             y2: midY - span,
-            angleLabel: x >= target.x ? '315° 斜向對齊' : '135° 斜向對齊',
+            angleLabel: x >= target.x ? `315° ${t('canvas.aligning')}` : `135° ${t('canvas.aligning')}`,
           };
         };
 
@@ -1550,7 +1623,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   targetPos: { x: finalX, y: finalY },
                   targetStation: stations.find((s) => s.id === stationId),
                   distance: refDist,
-                  label: `等距: ${Math.round(refDist)}`,
+                  label: t('canvas.equalDist', { dist: Math.round(refDist) }),
                 };
                 break;
               }
@@ -1715,7 +1788,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             const newStationIndex = regularCount + 1;
             const newStation: Station = {
               id: `st-${Date.now()}`,
-              name: `車站 ${newStationIndex}`,
+              name: `${t('app.defaultStationPrefix')} ${newStationIndex}`,
               code: `S${newStationIndex}`,
               x: pos.x,
               y: pos.y,
@@ -1770,7 +1843,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 const newStationIndex = regularCount + 1;
                 const newStation: Station = {
                   id: `st-${Date.now()}`,
-                  name: `車站 ${newStationIndex}`,
+                  name: `${t('app.defaultStationPrefix')} ${newStationIndex}`,
                   code: `S${newStationIndex}`,
                   x: eqGuide.targetPos.x,
                   y: eqGuide.targetPos.y,
@@ -1889,6 +1962,17 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   // Pointer Down on canvas background
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    if (
+      document.activeElement instanceof HTMLInputElement ||
+      document.activeElement instanceof HTMLTextAreaElement
+    ) {
+      document.activeElement.blur();
+    }
+    if (editingStationId) {
+      isComposingInlineNameRef.current = false;
+      const val = inlineNameInputRef.current?.value ?? editingStationName;
+      applyInlineStationName(val, true);
+    }
     if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1) return;
 
     if (e.pointerType === 'touch') {
@@ -2294,7 +2378,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   const selectedText = selectedTextId ? svgTexts.find((t) => t.id === selectedTextId) || null : null;
 
   const getTextBoxDimensions = (txt: CanvasText) => {
-    const lines = (txt.content || '文字').split('\n');
+    const lines = (txt.content || 'T').split('\n');
     const maxUnits = Math.max(
       ...lines.map((line) => {
         let u = 0;
@@ -2392,7 +2476,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative flex-1 h-full overflow-hidden select-none transition-colors touch-none ${
+      translate="no"
+      className={`notranslate relative flex-1 h-full overflow-hidden select-none transition-colors touch-none ${
         isLight ? 'bg-[#FAFAFA]' : 'bg-[#09090B]'
       } ${getCursorClass()}`}
       style={{ touchAction: 'none' }}
@@ -2416,9 +2501,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
         <span className="font-sans">
           {!gridSnap
             ? isCtrlDown || nodeAlign
-              ? '對齊中'
-              : '平滑'
-            : `吸附 ${gridSize}`}
+              ? t('canvas.aligning')
+              : t('canvas.smooth')
+            : t('canvas.snapGrid', { size: gridSize })}
         </span>
       </div>
 
@@ -2437,7 +2522,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
-          title="放大視角 (+)"
+          title={t('canvas.zoomIn')}
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -2448,7 +2533,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
-          title="縮小視角 (-)"
+          title={t('canvas.zoomOut')}
         >
           <Minus className="w-4 h-4" />
         </button>
@@ -2460,7 +2545,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
-          title="聚焦完整路網 (Fit View)"
+          title={t('canvas.fitView')}
         >
           <Maximize2 className="w-4 h-4" />
         </button>
@@ -2471,7 +2556,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
           }`}
-          title="回到坐標原點 (0, 0)"
+          title={t('canvas.originReset')}
         >
           <Crosshair className="w-4 h-4" />
         </button>
@@ -2481,7 +2566,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       <svg
         ref={svgRef}
         id="metro-canvas-svg"
-        className="w-full h-full block"
+        className="notranslate w-full h-full block"
         style={{ touchAction: 'none' }}
       >
         <defs>
@@ -2528,8 +2613,8 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             <line x1={-30} y1={0} x2={30} y2={0} stroke={isLight ? '#64748B' : '#64748B'} strokeWidth={1.5} />
             <line x1={0} y1={-30} x2={0} y2={30} stroke={isLight ? '#64748B' : '#64748B'} strokeWidth={1.5} />
             <circle r={4} fill="none" stroke={isLight ? '#64748B' : '#64748B'} strokeWidth={1} />
-            <text x={8} y={-8} className={`${isLight ? 'fill-slate-600' : 'fill-slate-500'} font-mono text-[9px]`}>
-              (0, 0) 原點
+            <text x={8} y={-8} className={`${isLight ? 'fill-slate-600' : 'fill-slate-500'} font-mono text-[9px] notranslate`}>
+              {t('canvas.originLabel')}
             </text>
           </g>
 
@@ -2758,6 +2843,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   className={`cursor-pointer ${isDraggingThis ? 'opacity-95' : ''}`}
                   onPointerDown={(e) => handleStationPointerDown(e, st)}
                   onPointerUp={(e) => handleStationPointerUp(e, st)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    startInlineEditStation(st);
+                  }}
                 >
                   {/* Generous transparent hit area scaled proportionally to marker size */}
                   <circle r={Math.max(26, 20 * maxScale)} fill="transparent" className="cursor-pointer" />
@@ -3019,11 +3108,11 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       <text
                         textAnchor="middle"
                         y={3.5}
-                        className={`font-sans text-[9px] font-bold select-none ${
+                        className={`notranslate font-sans text-[9px] font-bold select-none ${
                           isLight ? 'fill-sky-700' : 'fill-sky-300'
                         }`}
                       >
-                        虛擬節點
+                        {t('canvas.virtualNode')}
                       </text>
                     </g>
                   )}
@@ -3032,8 +3121,12 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   {!st.isVirtual && (
                     <g
                       transform={`translate(${labelDx}, ${labelDy})`}
-                      className="cursor-grab active:cursor-grabbing select-none"
+                      className="cursor-grab active:cursor-grabbing select-none notranslate"
                       onPointerDown={(e) => handleLabelPointerDown(e, st)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startInlineEditStation(st);
+                      }}
                     >
                       {(st.labelPosition === 'custom' || draggingLabelStationId === st.id) && (
                         <line
@@ -3077,34 +3170,36 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         />
 
                         <text
+                          key={`label-halo-${st.id}-${st.name}-${st.code || ''}`}
                           textAnchor={textAnchor}
-                          className={`font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
+                          className={`notranslate font-sans font-bold text-xs select-none stroke-[3.5px] paint-order-stroke pointer-events-none ${
                             isLight
                               ? 'fill-white stroke-white'
                               : 'fill-slate-950 stroke-slate-950'
                           }`}
                           strokeLinejoin="round"
                         >
-                          {st.name}{' '}
-                          {st.code && (
+                          {st.name}
+                          {st.code ? (
                             <tspan className={`font-mono text-[10px] ${isLight ? 'fill-white' : 'fill-slate-400'}`}>
-                              ({st.code})
+                              {` (${st.code})`}
                             </tspan>
-                          )}
+                          ) : null}
                         </text>
 
                         <text
+                          key={`label-text-${st.id}-${st.name}-${st.code || ''}`}
                           textAnchor={textAnchor}
-                          className={`font-sans font-semibold text-xs select-none pointer-events-none ${
+                          className={`notranslate font-sans font-semibold text-xs select-none pointer-events-none ${
                             isLight ? 'fill-slate-900' : 'fill-slate-100'
                           }`}
                         >
-                          {st.name}{' '}
-                          {st.code && (
+                          {st.name}
+                          {st.code ? (
                             <tspan className={`font-mono text-[10px] ${isLight ? 'fill-slate-500' : 'fill-slate-300'}`}>
-                              ({st.code})
+                              {` (${st.code})`}
                             </tspan>
-                          )}
+                          ) : null}
                         </text>
                       </g>
 
@@ -3122,7 +3217,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                           <text
                             textAnchor="middle"
                             y={3.5}
-                            className="font-mono text-[9px] fill-white font-bold select-none"
+                            className="notranslate font-mono text-[9px] fill-white font-bold select-none"
                           >
                             Δ{labelDx}, {labelDy}
                           </text>
@@ -3183,6 +3278,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 )}
                 {txt.hasHalo && (
                   <text
+                    key={`txt-halo-${txt.id}-${txt.content}`}
                     x={textX}
                     y={firstY}
                     textAnchor={anchor}
@@ -3194,7 +3290,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     strokeWidth={Math.max(3, txt.fontSize * 0.22)}
                     strokeLinejoin="round"
                     paintOrder="stroke"
-                    className="font-sans select-none pointer-events-none"
+                    className="notranslate font-sans select-none pointer-events-none"
                   >
                     {lines.map((line, idx) => (
                       <tspan key={idx} x={textX} dy={idx === 0 ? 0 : lineHeight}>
@@ -3204,6 +3300,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   </text>
                 )}
                 <text
+                  key={`txt-main-${txt.id}-${txt.content}`}
                   x={textX}
                   y={firstY}
                   textAnchor={anchor}
@@ -3211,7 +3308,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   fontWeight={fontWeight}
                   letterSpacing={letterSpacing !== 0 ? letterSpacing : undefined}
                   fill={txt.color || (isLight ? '#18181B' : '#F4F4F5')}
-                  className="font-sans select-none pointer-events-none"
+                  className="notranslate font-sans select-none pointer-events-none"
                 >
                   {lines.map((line, idx) => (
                     <tspan key={idx} x={textX} dy={idx === 0 ? 0 : lineHeight}>
@@ -3341,7 +3438,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                     }}
                     onDoubleClick={(e) => handleDeleteWaypoint(selectedConn.id, idx, e)}
                   >
-                    <title>右鍵點擊可刪除此節點 · 拖曳以改變軌跡</title>
+                    <title>{t('canvas.waypointTip')}</title>
                     {/* Generous hit area for easy grabbing */}
                     <circle r={14} fill="transparent" />
 
@@ -4346,7 +4443,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         textAnchor="middle"
                         className="font-sans text-[11px] font-extrabold fill-white select-none"
                       >
-                        {isStart ? '起點' : isEnd ? '終點' : `${idx + 1}`}
+                        {isStart ? t('canvas.pathStart') : isEnd ? t('canvas.pathEnd') : `${idx + 1}`}
                       </text>
                     </g>
                   </g>
@@ -4396,7 +4493,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       fontWeight="600"
                       fontFamily="system-ui, -apple-system, sans-serif"
                     >
-                      {count} 個節點
+                      {t('canvas.nodeCountBadge', { count })}
                     </text>
                   </g>
                 )}
@@ -4421,7 +4518,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               isLight ? 'border-zinc-200 text-zinc-700' : 'border-zinc-800 text-zinc-300'
             }`}
           >
-            已選 {currentSelectedStationIds.length} 站
+            {t('canvas.batchSelected', { count: currentSelectedStationIds.length })}
           </span>
 
           <button
@@ -4429,9 +4526,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
             }`}
-            title="將選取站點水平對齊 (相同 Y 坐標)"
+            title={t('canvas.alignHTip')}
           >
-            水平對齊
+            {t('canvas.alignH')}
           </button>
 
           <button
@@ -4439,9 +4536,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
             }`}
-            title="將選取站點垂直對齊 (相同 X 坐標)"
+            title={t('canvas.alignVTip')}
           >
-            垂直對齊
+            {t('canvas.alignV')}
           </button>
 
           {currentSelectedStationIds.length >= 3 && (
@@ -4450,9 +4547,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               className={`px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer hidden sm:inline-flex ${
                 isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
               }`}
-              title="水平等距分散排列選取之站點"
+              title={t('canvas.distributeHTip')}
             >
-              等距排列
+              {t('canvas.distributeH')}
             </button>
           )}
 
@@ -4464,10 +4561,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 className={`flex items-center gap-0.5 px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                   isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
                 }`}
-                title="往下一層 (-1) · 快捷鍵 ["
+                title={t('canvas.layerDownTip')}
               >
                 <ArrowDown className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">往下</span>
+                <span className="hidden sm:inline">{t('canvas.layerDown')}</span>
               </button>
               <button
                 type="button"
@@ -4475,10 +4572,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 className={`flex items-center gap-0.5 px-2 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                   isLight ? 'hover:bg-zinc-100 text-zinc-700' : 'hover:bg-zinc-800 text-zinc-200'
                 }`}
-                title="往上一層 (+1) · 快捷鍵 ]"
+                title={t('canvas.layerUpTip')}
               >
                 <ArrowUp className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">往上</span>
+                <span className="hidden sm:inline">{t('canvas.layerUp')}</span>
               </button>
             </div>
           )}
@@ -4492,9 +4589,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               }
             }}
             className="px-2 py-1 text-xs font-medium rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
-            title="批次刪除選取之所有站點 (Delete)"
+            title={t('canvas.deleteTip')}
           >
-            刪除 ({currentSelectedStationIds.length})
+            {t('canvas.deleteBtn', { count: currentSelectedStationIds.length })}
           </button>
 
           <button
@@ -4505,7 +4602,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
             className={`p-1 rounded-md transition-colors cursor-pointer ${
               isLight ? 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
             }`}
-            title="取消選取 (Esc)"
+            title={t('canvas.clearSelection')}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -4542,14 +4639,14 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
           }
         };
         const labelText = isConn
-          ? '路線段'
+          ? t('canvas.lineSegment')
           : isImg
-          ? selectedImage?.name || 'SVG 圖片'
+          ? selectedImage?.name || t('canvas.defaultImageName')
           : isTxt
-          ? selectedText?.content?.split('\n')[0] || 'SVG 文字'
+          ? selectedText?.content?.split('\n')[0] || t('canvas.defaultTextName')
           : selectedSingleStation?.isVirtual
-          ? '虛擬節點'
-          : selectedSingleStation?.name || '車站';
+          ? t('canvas.virtualNode')
+          : selectedSingleStation?.name || t('canvas.defaultStationName');
 
         const btnClass = `px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
           isLight
@@ -4584,7 +4681,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               onClick={() => setZ(MIN_Z_ORDER)}
               disabled={currentZ <= MIN_Z_ORDER}
               className={btnClass}
-              title="移至最底層 (-10) · Shift+["
+              title={t('canvas.toBottomTip')}
             >
               <ArrowDownToLine className="w-3.5 h-3.5" />
             </button>
@@ -4594,10 +4691,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               onClick={() => setZ(currentZ - 1)}
               disabled={currentZ <= MIN_Z_ORDER}
               className={`flex items-center gap-0.5 ${btnClass}`}
-              title="往下一層 (-1) · 快捷鍵 ["
+              title={t('canvas.layerDownTip')}
             >
               <ArrowDown className="w-3.5 h-3.5" />
-              <span>往下</span>
+              <span>{t('canvas.layerDown')}</span>
             </button>
 
             <button
@@ -4605,10 +4702,10 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               onClick={() => setZ(currentZ + 1)}
               disabled={currentZ >= MAX_Z_ORDER}
               className={`flex items-center gap-0.5 ${btnClass}`}
-              title="往上一層 (+1) · 快捷鍵 ]"
+              title={t('canvas.layerUpTip')}
             >
               <ArrowUp className="w-3.5 h-3.5" />
-              <span>往上</span>
+              <span>{t('canvas.layerUp')}</span>
             </button>
 
             <button
@@ -4616,7 +4713,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
               onClick={() => setZ(MAX_Z_ORDER)}
               disabled={currentZ >= MAX_Z_ORDER}
               className={btnClass}
-              title="移至最上層 (+10) · Shift+]"
+              title={t('canvas.toTopTip')}
             >
               <ArrowUpToLine className="w-3.5 h-3.5" />
             </button>
@@ -4626,7 +4723,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                 type="button"
                 onClick={() => setZ(0)}
                 className={btnClass}
-                title="重設為預設層級 (0)"
+                title={t('canvas.resetLayerTip')}
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
@@ -4644,13 +4741,13 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   return (
                     <div className="flex items-center gap-0.5">
                       <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                        偏移
+                        {t('canvas.offset')}
                       </span>
                       <button
                         type="button"
                         onClick={() => onUpdateConnectionOffset(selectedConn.id, clampLineOffset(curOffset - 1))}
                         className={`${btnClass} font-mono`}
-                        title="往負方向偏移 -1"
+                        title={t('canvas.offsetMinusTip')}
                       >
                         -1
                       </button>
@@ -4658,7 +4755,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         type="button"
                         onClick={() => onUpdateConnectionOffset(selectedConn.id, 0)}
                         className={`${btnClass} font-mono tabular-nums font-semibold`}
-                        title="點擊歸零偏移 (0)"
+                        title={t('canvas.offsetResetTip')}
                       >
                         {curOffset > 0 ? `+${curOffset}` : curOffset}
                       </button>
@@ -4666,7 +4763,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                         type="button"
                         onClick={() => onUpdateConnectionOffset(selectedConn.id, clampLineOffset(curOffset + 1))}
                         className={`${btnClass} font-mono`}
-                        title="往正方向偏移 +1"
+                        title={t('canvas.offsetPlusTip')}
                       >
                         +1
                       </button>
@@ -4683,7 +4780,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       }`}
                     >
                       <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                        粗細
+                        {t('canvas.strokeWidth')}
                       </span>
                       <button
                         type="button"
@@ -4694,7 +4791,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                           });
                         }}
                         className={`${btnClass} font-mono`}
-                        title="減細線寬 (-1)"
+                        title={t('canvas.widthMinusTip')}
                       >
                         -1
                       </button>
@@ -4705,7 +4802,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                           onUpdateConnectionStyle(selectedConn.id, { strokeWidth: 6 });
                         }}
                         className={`${btnClass} font-mono tabular-nums font-semibold`}
-                        title="點擊重設為預設線寬 (6)"
+                        title={t('canvas.widthResetTip')}
                       >
                         {curWidth}
                       </button>
@@ -4718,7 +4815,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                           });
                         }}
                         className={`${btnClass} font-mono`}
-                        title="加粗線寬 (+1)"
+                        title={t('canvas.widthPlusTip')}
                       >
                         +1
                       </button>
@@ -4738,7 +4835,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   }`}
                 >
                   <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    縮放
+                    {t('canvas.scale')}
                   </span>
                   <button
                     type="button"
@@ -4750,7 +4847,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="縮小 (-0.2×)"
+                    title={t('canvas.scaleMinusTip')}
                   >
                     -0.2
                   </button>
@@ -4767,7 +4864,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono tabular-nums font-semibold`}
-                    title="點擊重設縮放與旋轉 (1×)"
+                    title={t('canvas.scaleResetTip')}
                   >
                     {curScale}×
                   </button>
@@ -4781,7 +4878,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="放大 (+0.2×)"
+                    title={t('canvas.scalePlusTip')}
                   >
                     +0.2
                   </button>
@@ -4799,7 +4896,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   }`}
                 >
                   <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    縮放
+                    {t('canvas.scale')}
                   </span>
                   <button
                     type="button"
@@ -4811,7 +4908,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="縮小 (-0.2×)"
+                    title={t('canvas.scaleMinusTip')}
                   >
                     -0.2
                   </button>
@@ -4828,7 +4925,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono tabular-nums font-semibold`}
-                    title="點擊重設縮放與旋轉 (1×)"
+                    title={t('canvas.scaleResetTip')}
                   >
                     {curScale}×
                   </button>
@@ -4842,7 +4939,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="放大 (+0.2×)"
+                    title={t('canvas.scalePlusTip')}
                   >
                     +0.2
                   </button>
@@ -4860,7 +4957,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   }`}
                 >
                   <span className={`text-[11px] hidden md:inline mr-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    字級
+                    {t('canvas.fontSize')}
                   </span>
                   <button
                     type="button"
@@ -4872,7 +4969,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="減小字級 (-2)"
+                    title={t('canvas.fontMinusTip')}
                   >
                     -2
                   </button>
@@ -4889,7 +4986,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono tabular-nums font-semibold`}
-                    title="點擊重設文字比例與旋轉"
+                    title={t('canvas.fontResetTip')}
                   >
                     {selectedText.fontSize}{curScale !== 1 ? ` · ${curScale}×` : ''}
                   </button>
@@ -4903,13 +5000,119 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                       });
                     }}
                     className={`${btnClass} font-mono`}
-                    title="加大字級 (+2)"
+                    title={t('canvas.fontPlusTip')}
                   >
                     +2
                   </button>
                 </div>
               );
             })()}
+          </div>
+        );
+      })()}
+
+      {/* Floating Inline Station Rename Editor (Double-click station or label) */}
+      {editingStationId && (() => {
+        const editingStation = stations.find((s) => s.id === editingStationId);
+        if (!editingStation || editingStation.isVirtual) return null;
+
+        let labelDx = 0;
+        let labelDy = -18;
+        if (editingStation.labelPosition === 'custom' && editingStation.labelOffset) {
+          labelDx = editingStation.labelOffset.x;
+          labelDy = editingStation.labelOffset.y;
+        } else {
+          const presetKey = (editingStation.labelPosition || 'top') as keyof typeof LABEL_POSITION_PRESETS;
+          const preset = LABEL_POSITION_PRESETS[presetKey];
+          if (preset) {
+            labelDx = preset.dx;
+            labelDy = preset.dy;
+          }
+        }
+
+        const rawLeft = (editingStation.x + labelDx) * viewTransform.scale + viewTransform.x;
+        const rawTop = (editingStation.y + labelDy) * viewTransform.scale + viewTransform.y - 38;
+        const containerW = containerRef.current?.clientWidth || 800;
+        const containerH = containerRef.current?.clientHeight || 600;
+        const clampedLeft = Math.max(120, Math.min(containerW - 120, rawLeft));
+        const clampedTop = Math.max(16, Math.min(containerH - 64, rawTop));
+
+        return (
+          <div
+            translate="no"
+            style={{
+              left: `${clampedLeft}px`,
+              top: `${clampedTop}px`,
+              transform: 'translate(-50%, -100%)',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onWheel={(e) => e.stopPropagation()}
+            className={`notranslate absolute z-30 flex items-center gap-1.5 p-1.5 rounded-lg border shadow-xl ${
+              isLight
+                ? 'bg-white border-zinc-300 text-zinc-900'
+                : 'bg-[#18181B] border-zinc-700 text-zinc-100'
+            }`}
+          >
+            <input
+              ref={inlineNameInputRef}
+              type="text"
+              value={editingStationName}
+              onCompositionStart={() => {
+                isComposingInlineNameRef.current = true;
+              }}
+              onCompositionEnd={(e) => {
+                isComposingInlineNameRef.current = false;
+                const finalVal = e.currentTarget.value;
+                setEditingStationName(finalVal);
+                applyInlineStationName(finalVal, false);
+              }}
+              onChange={(e) => {
+                const val = e.target.value;
+                setEditingStationName(val);
+                if (!isComposingInlineNameRef.current && !(e.nativeEvent as InputEvent)?.isComposing) {
+                  applyInlineStationName(val, false);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (isComposingInlineNameRef.current || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  applyInlineStationName(e.currentTarget.value, true);
+                } else if (e.key === 'Escape') {
+                  if (isComposingInlineNameRef.current || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  cancelInlineEditStation();
+                }
+              }}
+              onBlur={(e) => {
+                isComposingInlineNameRef.current = false;
+                applyInlineStationName(e.currentTarget.value, true);
+              }}
+              placeholder={t('canvas.inlinePlaceholder')}
+              className={`w-40 px-2.5 py-1 text-xs rounded border focus:outline-none ${
+                isLight
+                  ? 'bg-zinc-50 border-zinc-300 text-zinc-900 focus:bg-white focus:border-zinc-900'
+                  : 'bg-zinc-950 border-zinc-700 text-zinc-100 focus:border-zinc-400'
+              }`}
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                isComposingInlineNameRef.current = false;
+                const val = inlineNameInputRef.current?.value ?? editingStationName;
+                applyInlineStationName(val, true);
+              }}
+              className={`px-2 py-1 text-xs font-medium rounded inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                isLight
+                  ? 'bg-zinc-900 hover:bg-zinc-800 text-white'
+                  : 'bg-zinc-100 hover:bg-white text-zinc-900'
+              }`}
+              title={t('canvas.confirmTip')}
+            >
+              <Check className="w-3 h-3" />
+              <span>{t('canvas.confirm')}</span>
+            </button>
           </div>
         );
       })()}
