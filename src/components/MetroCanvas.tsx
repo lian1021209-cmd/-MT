@@ -1650,8 +1650,11 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
       if (canvasPointerDownRef.current) {
         const dx = e.clientX - canvasPointerDownRef.current.clientX;
         const dy = e.clientY - canvasPointerDownRef.current.clientY;
+        const isPlacementOrConnect =
+          toolMode === 'add_station' || toolMode === 'add_virtual_node' || toolMode === 'connect';
+        const dragThreshold = isPlacementOrConnect ? 8 : 3;
 
-        if (!hasDraggedCanvasRef.current && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        if (!hasDraggedCanvasRef.current && (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold)) {
           hasDraggedCanvasRef.current = true;
           setIsPanning(true);
         }
@@ -1978,6 +1981,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
     onUpdateImage,
     onUpdateText,
     onRecordHistory,
+    defaultStationStyle,
+    defaultStationVariant,
+    t,
     viewTransform.scale
   ]);
 
@@ -2234,6 +2240,9 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
   // Station Pointer Down: connect or move
   const handleStationPointerDown = (e: React.PointerEvent, station: Station) => {
+    if (toolMode === 'add_station' || toolMode === 'add_virtual_node' || toolMode === 'pan') {
+      return;
+    }
     e.stopPropagation();
     if (e.pointerType === 'touch') {
       touchPointsRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
@@ -2530,6 +2539,7 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
       {/* Floating Canvas Navigation HUD (Bottom-Right) */}
       <div
+        onPointerDown={(e) => e.stopPropagation()}
         className={`absolute bottom-4 right-4 z-10 flex flex-col items-center p-1 gap-0.5 rounded-lg border transition-colors ${
           isLight
             ? 'bg-white/95 border-zinc-200'
@@ -2742,6 +2752,15 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
                   key={conn.id}
                   className="cursor-pointer group"
                   onClick={(e) => {
+                    if (
+                      toolMode === 'add_station' ||
+                      toolMode === 'add_virtual_node' ||
+                      toolMode === 'connect' ||
+                      toolMode === 'pan' ||
+                      toolMode === 'marquee_select'
+                    ) {
+                      return;
+                    }
                     e.stopPropagation();
                     onSelectConnection(conn.id);
                     onSelectStation(null);
@@ -4670,6 +4689,81 @@ export const MetroCanvas: React.FC<MetroCanvasProps> = ({
 
         </g>
       </svg>
+
+      {/* Active Placement Mode HUD Pill */}
+      {(toolMode === 'add_station' || toolMode === 'add_virtual_node') && (() => {
+        const variantLabelMap: Record<StationVariant, string> = {
+          auto: t('leftToolbar.station'),
+          shanghai_basic: t('sidebar.variantShanghaiBasic'),
+          shanghai_2020: t('sidebar.variantShanghai2020'),
+          shanghai_interchange: t('sidebar.variantShanghaiInterchange'),
+          shanghai_suburban: t('sidebar.variantShanghaiSuburban'),
+          guangzhou_basic: t('sidebar.variantGuangzhouBasic'),
+          guangzhou_interchange: t('sidebar.variantGuangzhouInterchange'),
+          guangzhou_interchange_2024: t('sidebar.variantGuangzhouInterchange2024'),
+          beijing_basic: t('sidebar.variantBeijingBasic'),
+          beijing_interchange: t('sidebar.variantBeijingInterchange'),
+        };
+        const activeLabel =
+          toolMode === 'add_virtual_node'
+            ? t('leftToolbar.virtualNode')
+            : variantLabelMap[defaultStationVariant] || t('leftToolbar.station');
+        const previewVariant =
+          toolMode === 'add_station'
+            ? resolveEffectiveStationVariant(defaultStationStyle, 'regular', defaultStationVariant)
+            : null;
+        const previewViewBox =
+          previewVariant === 'guangzhou_interchange'
+            ? '-30 -11 60 22'
+            : previewVariant === 'guangzhou_interchange_2024'
+            ? '-30 -15 60 30'
+            : previewVariant === 'guangzhou_basic'
+            ? '-18 -10 36 20'
+            : '-14 -11 28 22';
+
+        return (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`notranslate absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg shadow-md border select-none max-w-[90vw] ${
+              isLight
+                ? 'bg-white/95 border-zinc-200 text-zinc-800'
+                : 'bg-[#111113]/95 border-zinc-800 text-zinc-100'
+            }`}
+          >
+            <span className="w-8 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center shrink-0">
+              {toolMode === 'add_virtual_node' ? (
+                <svg className="w-4 h-4" viewBox="-10 -10 20 20">
+                  <circle r={6} fill="#000000" stroke="#FFFFFF" strokeWidth={1.5} />
+                  <line x1={-2.5} y1={-2.5} x2={2.5} y2={2.5} stroke="#FFFFFF" strokeWidth={1.5} />
+                  <line x1={2.5} y1={-2.5} x2={-2.5} y2={2.5} stroke="#FFFFFF" strokeWidth={1.5} />
+                </svg>
+              ) : previewVariant ? (
+                <svg className="w-7 h-4" viewBox={previewViewBox}>
+                  <CityStationSymbol variant={previewVariant} />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" viewBox="-10 -10 20 20">
+                  <circle r={5.5} fill="#FFFFFF" stroke="#0F172A" strokeWidth={2} />
+                </svg>
+              )}
+            </span>
+            <span className="text-xs font-semibold whitespace-nowrap">{activeLabel}</span>
+            <span className={`hidden sm:inline text-[11px] truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+              {toolMode === 'add_virtual_node' ? t('leftToolbar.virtualNodeTip') : t('leftToolbar.stationTip')}
+            </span>
+            <button
+              type="button"
+              onClick={() => onSetToolMode('select')}
+              className={`ml-1 p-1 rounded transition-colors cursor-pointer ${
+                isLight ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+              title={t('canvas.clearSelection')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Floating Batch Selection Control Bar */}
       {currentSelectedStationIds.length > 1 && (

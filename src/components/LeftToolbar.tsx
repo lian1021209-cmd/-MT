@@ -132,7 +132,8 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
       const asideRect = asideRef.current.getBoundingClientRect();
       const btnRect = triggerEl.getBoundingClientRect();
       const relTop = btnRect.top - asideRect.top;
-      const maxTop = Math.max(8, asideRect.height - estimatedHeight - 8);
+      const clampedEst = Math.min(estimatedHeight, Math.max(120, asideRect.height - 16));
+      const maxTop = Math.max(8, asideRect.height - clampedEst - 8);
       setFlyoutTop(Math.max(8, Math.min(maxTop, relTop)));
     }
     setActiveFlyout(kind);
@@ -424,11 +425,16 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   const activeCityInfo = cityMeta[defaultStationStyle] || cityMeta.default;
   const activeLineStyleLabel = lineStyleOptions.find((o) => o.id === defaultStrokeStyle)?.label || defaultStrokeStyle;
 
+  const activeVariantMeta =
+    defaultStationVariant !== 'auto'
+      ? stationVariantOptions.find((o) => o.variant === defaultStationVariant) || null
+      : null;
+
   return (
     <aside
       ref={asideRef}
       aria-label={t('app.title')}
-      className={`relative w-14 border-r flex flex-col items-center select-none shrink-0 h-full min-h-0 z-20 transition-colors ${
+      className={`relative w-[62px] border-r flex flex-col items-center select-none shrink-0 h-full min-h-0 z-40 transition-colors ${
         isLight ? 'bg-white border-zinc-200' : 'bg-[#111113] border-zinc-800'
       }`}
     >
@@ -482,11 +488,24 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
             onSetToolMode('add_station');
             setActiveFlyout(null);
           }}
-          className={getToolButtonClass(toolMode === 'add_station')}
+          className={`${getToolButtonClass(toolMode === 'add_station')} relative`}
           title={t('leftToolbar.stationTip')}
         >
-          <PlusCircle className="w-4 h-4" />
-          <span className="text-[10px] font-medium leading-none truncate max-w-[42px]">{t('leftToolbar.station')}</span>
+          <PlusCircle className="w-4 h-4 pointer-events-none" />
+          <span className="text-[10px] font-medium leading-none truncate max-w-[44px] pointer-events-none">
+            {t('leftToolbar.station')}
+          </span>
+          {activeVariantMeta && (
+            <span
+              className={`pointer-events-none absolute -bottom-0.5 -right-0.5 px-0.5 h-3.5 min-w-[16px] rounded flex items-center justify-center border bg-white ${
+                isLight ? 'border-zinc-300' : 'border-zinc-600'
+              }`}
+            >
+              <svg className="w-3.5 h-2.5" viewBox={activeVariantMeta.viewBox}>
+                <CityStationSymbol variant={activeVariantMeta.variant} />
+              </svg>
+            </span>
+          )}
         </button>
 
         <button
@@ -647,21 +666,31 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
               <>
                 <div className={`w-7 h-px my-1 shrink-0 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
                 {stationVariantOptions.map((item) => {
-                  const isVarActive = defaultStationVariant === item.variant;
+                  const isVarSelected = defaultStationVariant === item.variant;
+                  const isVarArmed = isVarSelected && toolMode === 'add_station';
                   return (
                     <button
                       key={item.variant}
                       type="button"
-                      onClick={() => onSelectStationVariant(item.variant)}
-                      className={getToolButtonClass(isVarActive)}
-                      title={item.label}
+                      onClick={() => {
+                        setActiveFlyout(null);
+                        onSelectStationVariant(item.variant);
+                      }}
+                      className={`${getToolButtonClass(isVarArmed)} ${
+                        isVarSelected && !isVarArmed
+                          ? isLight
+                            ? 'ring-1 ring-zinc-400 bg-zinc-100/80 text-zinc-900'
+                            : 'ring-1 ring-zinc-500 bg-zinc-800/80 text-zinc-100'
+                          : ''
+                      }`}
+                      title={`${item.label} — ${t('leftToolbar.stationTip')}`}
                     >
-                      <span className="w-9 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center overflow-hidden">
-                        <svg className="w-8 h-4" viewBox={item.viewBox}>
+                      <span className="pointer-events-none w-9 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center overflow-hidden">
+                        <svg className="w-8 h-4 pointer-events-none" viewBox={item.viewBox}>
                           <CityStationSymbol variant={item.variant} />
                         </svg>
                       </span>
-                      <span className="text-[8.5px] font-medium leading-none truncate max-w-[44px]">
+                      <span className="pointer-events-none text-[8.5px] font-medium leading-none truncate max-w-[46px]">
                         {item.label}
                       </span>
                     </button>
@@ -820,8 +849,8 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
       {activeFlyout === 'city' && (
         <div
           ref={flyoutRef}
-          style={{ top: Math.min(flyoutTop, 180) }}
-          className={`absolute left-full ml-2 z-50 w-72 max-h-[78vh] overflow-y-auto rounded-lg shadow-lg p-2.5 text-xs border ${
+          style={{ top: flyoutTop, maxHeight: 'calc(100% - 16px)' }}
+          className={`absolute left-full ml-2 z-50 w-72 overflow-y-auto rounded-lg shadow-lg p-2.5 text-xs border ${
             isLight
               ? 'bg-white border-zinc-200 text-zinc-800'
               : 'bg-[#111113] border-zinc-800 text-zinc-200'
@@ -856,7 +885,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
                       : 'bg-zinc-900/60 border-zinc-800 text-zinc-200 hover:bg-zinc-800'
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 pointer-events-none">
                     <div className="font-medium text-[11px]">{info.label}</div>
                     <div
                       className={`text-[9.5px] truncate ${
@@ -872,7 +901,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
                       {info.desc}
                     </div>
                   </div>
-                  {info.preview}
+                  <span className="pointer-events-none">{info.preview}</span>
                 </button>
               );
             })}
@@ -885,7 +914,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
                 <span className="font-semibold text-[11px]">{t('sidebar.stationVariantTitle')}</span>
                 <button
                   type="button"
-                  onClick={() => onSelectStationVariant('auto')}
+                  onClick={() => {
+                    onSelectStationVariant('auto');
+                    setActiveFlyout(null);
+                  }}
                   className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer ${
                     defaultStationVariant === 'auto'
                       ? isLight
@@ -919,14 +951,14 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
                           ? 'bg-zinc-50/70 border-zinc-200 text-zinc-700 hover:bg-zinc-100'
                           : 'bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
                       }`}
-                      title={item.label}
+                      title={`${item.label} — ${t('leftToolbar.stationTip')}`}
                     >
-                      <span className="w-full h-7 rounded bg-white border border-zinc-200/80 flex items-center justify-center">
-                        <svg className="w-16 h-6" viewBox={item.viewBox}>
+                      <span className="pointer-events-none w-full h-7 rounded bg-white border border-zinc-200/80 flex items-center justify-center">
+                        <svg className="w-16 h-6 pointer-events-none" viewBox={item.viewBox}>
                           <CityStationSymbol variant={item.variant} />
                         </svg>
                       </span>
-                      <span className="text-[9.5px] leading-tight text-center truncate w-full">
+                      <span className="pointer-events-none text-[9.5px] leading-tight text-center truncate w-full">
                         {item.label}
                       </span>
                     </button>

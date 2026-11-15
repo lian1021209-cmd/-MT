@@ -408,6 +408,8 @@ export default function App() {
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'inspector' | 'stats' | 'routing'>('inspector');
+  const [suppressMobileSheet, setSuppressMobileSheet] = useState<boolean>(false);
+  const justAddedStationRef = useRef<boolean>(false);
 
   const viewportCenterRef = useRef<Point>({ x: 300, y: 220 });
   const handleViewportCenterChange = useCallback((center: Point) => {
@@ -431,6 +433,8 @@ export default function App() {
   // Station Handlers
   const handleAddStation = (station: Station) => {
     pushHistory();
+    justAddedStationRef.current = true;
+    setSuppressMobileSheet(true);
     setStations((prev) => [...prev, station]);
   };
 
@@ -709,33 +713,15 @@ export default function App() {
       localStorage.setItem('metro_default_stroke_style', nextStroke);
     }
 
-    if (selectedStationId) {
-      const target = stations.find((s) => s.id === selectedStationId);
-      if (target && !target.isVirtual) {
-        const isInterchangeVar =
-          variant === 'shanghai_interchange' ||
-          variant === 'guangzhou_interchange' ||
-          variant === 'guangzhou_interchange_2024' ||
-          variant === 'beijing_interchange';
-        pushHistory();
-        setStations((prev) =>
-          prev.map((st) =>
-            st.id === selectedStationId
-              ? {
-                  ...st,
-                  stationVariant: variant === 'auto' ? undefined : variant,
-                  ...(variant !== 'auto'
-                    ? {
-                        stationStyle: getCityFromVariant(variant),
-                        type: isInterchangeVar ? 'interchange' : 'regular',
-                      }
-                    : {}),
-                }
-              : st
-          )
-        );
-      }
-    }
+    // Selecting a special station symbol from the left toolbar immediately clears selection and enters station placement mode
+    setSelectedStationId(null);
+    setSelectedStationIds([]);
+    setSelectedConnectionId(null);
+    setSelectedImageId(null);
+    setSelectedTextId(null);
+    setSidebarTab('inspector');
+    setSuppressMobileSheet(true);
+    setToolMode('add_station');
   };
 
   const handleChangeDefaultStrokeStyle = (style: StrokeStyle) => {
@@ -1310,8 +1296,11 @@ export default function App() {
           toolMode={toolMode}
           onSetToolMode={(mode) => {
             setToolMode(mode);
-            if (mode === 'add_station' || mode === 'add_virtual_node') {
+            setSuppressMobileSheet(true);
+            setSidebarTab('inspector');
+            if (mode === 'add_station' || mode === 'add_virtual_node' || mode === 'connect' || mode === 'pan') {
               setSelectedStationId(null);
+              setSelectedStationIds([]);
               setSelectedConnectionId(null);
               setSelectedImageId(null);
               setSelectedTextId(null);
@@ -1392,6 +1381,11 @@ export default function App() {
           nodeAlign={nodeAlign}
           activeRouteType={activeRouteType}
           onSelectStation={(id) => {
+            if (justAddedStationRef.current) {
+              justAddedStationRef.current = false;
+            } else if (id) {
+              setSuppressMobileSheet(false);
+            }
             setSelectedStationId(id);
             if (id) {
               setSelectedConnectionId(null);
@@ -1403,6 +1397,9 @@ export default function App() {
             }
           }}
           onSelectStationIds={(ids) => {
+            if (ids.length > 0) {
+              setSuppressMobileSheet(false);
+            }
             setSelectedStationIds(ids);
             if (ids.length === 0) {
               setSelectedStationId(null);
@@ -1415,6 +1412,9 @@ export default function App() {
             }
           }}
           onSelectConnection={(id) => {
+            if (id) {
+              setSuppressMobileSheet(false);
+            }
             setSelectedConnectionId(id);
             if (id) {
               setSelectedStationId(null);
@@ -1424,6 +1424,9 @@ export default function App() {
             }
           }}
           onSelectImage={(id) => {
+            if (id) {
+              setSuppressMobileSheet(false);
+            }
             setSelectedImageId(id);
             if (id) {
               setSelectedStationId(null);
@@ -1434,6 +1437,9 @@ export default function App() {
             }
           }}
           onSelectText={(id) => {
+            if (id) {
+              setSuppressMobileSheet(false);
+            }
             setSelectedTextId(id);
             if (id) {
               setSelectedStationId(null);
@@ -1471,19 +1477,19 @@ export default function App() {
         />
 
         {/* Mobile Backdrop when Inspector, Routing, or Stats Drawer is open */}
-        {(selectedStation ||
-          selectedConnection ||
-          selectedImage ||
-          selectedText ||
+        {((Boolean(selectedStation || selectedConnection || selectedImage || selectedText) &&
+          !suppressMobileSheet) ||
           sidebarTab === 'stats' ||
           sidebarTab === 'routing') && (
           <div
             className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-2xs transition-opacity"
             onClick={() => {
               setSelectedStationId(null);
+              setSelectedStationIds([]);
               setSelectedConnectionId(null);
               setSelectedImageId(null);
               setSelectedTextId(null);
+              setSuppressMobileSheet(false);
               setSidebarTab('inspector');
             }}
           />
@@ -1491,6 +1497,7 @@ export default function App() {
 
         {/* Right Inspector & Stats Sidebar */}
         <Sidebar
+          suppressMobileDrawer={suppressMobileSheet}
           selectedStation={selectedStation}
           selectedConnection={selectedConnection}
           selectedStationIds={selectedStationIds}

@@ -386,6 +386,7 @@ interface SidebarProps {
   onApplyStationStyleToAll?: (style: StationStyle) => void;
   onApplyLineStyleToSameColor?: (connId: string) => void;
   onApplyLineStyleToAll?: (connId: string) => void;
+  suppressMobileDrawer?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -445,6 +446,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onApplyStationStyleToAll,
   onApplyLineStyleToSameColor,
   onApplyLineStyleToAll,
+  suppressMobileDrawer = false,
 }) => {
   const { t } = useI18n();
   const isLight = theme === 'light';
@@ -885,10 +887,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const isMobileOpen = Boolean(
-    selectedStation ||
-      selectedConnection ||
-      selectedImage ||
-      selectedText ||
+    ((selectedStation || selectedConnection || selectedImage || selectedText) && !suppressMobileDrawer) ||
       currentTab === 'stats' ||
       currentTab === 'routing'
   );
